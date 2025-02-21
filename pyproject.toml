@@ -1,0 +1,22 @@
+[project]
+name = "fractime"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "hmmlearn>=0.3.3",
+    "ipython>=8.32.0",
+    "matplotlib>=3.10.0",
+    "numba>=0.61.0",
+    "numpy>=2.1.3",
+    "pandas>=2.2.3",
+    "plotly>=6.0.0",
+    "polars>=1.22.0",
+    "pyarrow>=19.0.1",
+    "requests>=2.32.3",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.15.2",
+    "streamlit>=1.42.2",
+    "yfinance>=0.2.54",
+]
