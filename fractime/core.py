@@ -26,20 +26,27 @@ def get_yahoo_data(symbol: str, start_date: str) -> pl.DataFrame:
         if df.empty:
             raise ValueError("No data returned from Yahoo Finance")
             
-        # Convert pandas DataFrame to Polars with explicit schema
+        # Convert pandas DataFrame to Polars
         df = df.reset_index()
-        df = pl.DataFrame({
-            'Date': pl.Series(df['Date'].values),
-            'Close': pl.Series(df['Close'].values, dtype=pl.Float64)
-        })
-        return df
+        df_pl = pl.from_pandas(df)
+        
+        # Select only required columns
+        df_pl = df_pl.select(['Date', 'Close'])
+        
+        # Verify the data
+        if df_pl.shape[0] == 0:
+            raise ValueError("No rows in DataFrame")
+            
+        return df_pl
         
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        print(f"Error fetching data for {symbol}: {str(e)}")
         # Return some sample data for testing
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.now()
         days = (end_date - start_dt).days + 1
+        if days <= 0:
+            days = 30  # Fallback to 30 days of data if date range is invalid
         dates = [start_dt + timedelta(days=x) for x in range(days)]
         close = np.cumsum(np.random.normal(0, 1, days)) + 100
         
@@ -122,72 +129,96 @@ class FractalAnalyzer:
         self.max_window = max_window
     
     def analyze_patterns(self, prices: np.ndarray) -> Dict:
+        if not isinstance(prices, np.ndarray):
+            prices = np.array(prices)
+            
+        if len(prices.shape) != 1:
+            prices = prices.ravel()
+            
+        if len(prices) < self.min_window:
+            raise ValueError(f"Not enough data points. Need at least {self.min_window}, got {len(prices)}")
+            
         results = {}
         
-        # Compute Hurst exponent
-        results['hurst'] = compute_hurst_exponent(
-            prices, 
-            self.min_window, 
-            self.max_window
-        )
-        
-        # Compute fractal dimension
-        scaled_prices = StandardScaler().fit_transform(prices.reshape(-1, 1)).ravel()
-        results['fractal_dim'] = compute_box_dimension(
-            scaled_prices,
-            self.min_window,
-            self.max_window,
-            20
-        )
-        
-        # Find self-similar patterns
-        patterns = self._find_patterns(prices)
-        # Convert array to list of dicts for compatibility
-        results['self_similar_patterns'] = [
-            {
-                'start': int(p[0]), 
-                'length': int(p[1]), 
-                'similarity': float(p[2])
-            } 
-            for p in patterns
-        ]
+        try:
+            # Compute Hurst exponent
+            results['hurst'] = compute_hurst_exponent(
+                prices, 
+                self.min_window, 
+                self.max_window
+            )
+            
+            # Compute fractal dimension
+            # Reshape to 2D array for StandardScaler
+            prices_2d = prices.reshape(-1, 1)
+            if np.all(prices_2d == prices_2d[0]):
+                # If all prices are the same, add tiny noise to avoid scaling issues
+                prices_2d = prices_2d + np.random.normal(0, 1e-8, prices_2d.shape)
+            
+            scaled_prices = StandardScaler().fit_transform(prices_2d).ravel()
+            results['fractal_dim'] = compute_box_dimension(
+                scaled_prices,
+                self.min_window,
+                self.max_window,
+                20
+            )
+            
+            # Find self-similar patterns
+            patterns = self._find_patterns(prices)
+            results['self_similar_patterns'] = patterns
+        except Exception as e:
+            print(f"Error in analyze_patterns: {str(e)}")
+            # Return safe default values
+            results = {
+                'hurst': 0.5,
+                'fractal_dim': 1.5,
+                'self_similar_patterns': []
+            }
+            
         return results
     
     @staticmethod
-    @njit
-    def _find_patterns(prices: np.ndarray) -> np.ndarray:
+    def _find_patterns(prices: np.ndarray) -> list:
         """Find self-similar patterns in price data."""
-        # Pre-allocate maximum possible patterns
-        max_patterns = (len(prices) - 20) * 240  # rough estimate
+        patterns = []
+        returns = np.diff(np.log(prices))
         
-        # Create a simple array instead of structured array
-        patterns = np.zeros((max_patterns, 3))  # [start, length, similarity]
-        
-        pattern_count = 0
         for window in range(10, min(250, len(prices)//3)):
             for i in range(len(prices)-window*2):
                 pattern1 = prices[i:i+window]
+                pattern1_returns = returns[i:i+window-1]
+                pattern1_vol = np.std(pattern1_returns)
                 pattern2 = prices[i+window:i+window*2]
+                pattern2_returns = returns[i+window:i+window*2-1]
+                pattern2_vol = np.std(pattern2_returns)
+                
+                # Skip if either pattern has zero volatility
+                if pattern1_vol == 0 or pattern2_vol == 0:
+                    continue
                 
                 # Normalize patterns
-                p1_std = np.std(pattern1)
-                p2_std = np.std(pattern2)
+                pattern1_norm = (pattern1_returns - np.mean(pattern1_returns)) / pattern1_vol
+                pattern2_norm = (pattern2_returns - np.mean(pattern2_returns)) / pattern2_vol
                 
-                if p1_std > 0 and p2_std > 0:
-                    pattern1_norm = (pattern1 - np.mean(pattern1)) / p1_std
-                    pattern2_norm = (pattern2 - np.mean(pattern2)) / p2_std
-                    
-                    # Compute correlation
-                    corr = np.corrcoef(pattern1_norm, pattern2_norm)[0,1]
-                    if corr > 0.8:
-                        patterns[pattern_count] = [i, window, corr]
-                        pattern_count += 1
-                        if pattern_count >= max_patterns:
-                            break
-            if pattern_count >= max_patterns:
-                break
+                # Compute similarity
+                similarity = np.corrcoef(pattern1_norm, pattern2_norm)[0,1]
+                
+                if similarity > 0.8:  # Only keep strong correlations
+                    patterns.append({
+                        'start': i,
+                        'length': window,
+                        'returns': pattern1_returns,
+                        'volatility': pattern1_vol,
+                        'similarity': similarity,
+                        'fractal_dim': compute_box_dimension(
+                            StandardScaler().fit_transform(pattern1.reshape(-1, 1)).ravel(),
+                            min(5, window//4),
+                            min(window, window//2),
+                            2
+                        )
+                    })
         
-        return patterns[:pattern_count]
+        return patterns
 
 class FractalSimulator:
     """Generates paths based on fractal patterns and historical distributions."""
@@ -312,21 +343,80 @@ class FractalSimulator:
         pattern_weight: float = 0.3,
         cloud_paths: int = 200
     ) -> Tuple[np.ndarray, Dict]:
-        """Generate paths using direct sampling from empirical distribution."""
+        """Generate paths using regime-matched sampling based on recent volatility."""
         # Get historical returns
         historical_returns = np.diff(np.log(self.prices))
+        
+        # Define lookback window as 2x the forecast horizon
+        lookback_window = 2 * n_steps
+        
+        # Get recent volatility regime
+        recent_returns = historical_returns[-lookback_window:]
+        recent_vol = np.std(recent_returns)
+        
+        # Find similar volatility regimes in history using multiple metrics
+        regime_windows = []
+        recent_skew = stats.skew(recent_returns)
+        recent_kurt = stats.kurtosis(recent_returns)
+        
+        for i in range(len(historical_returns) - lookback_window):
+            window_returns = historical_returns[i:i+lookback_window]
+            window_vol = np.std(window_returns)
+            window_skew = stats.skew(window_returns)
+            window_kurt = stats.kurtosis(window_returns)
+            
+            # Calculate similarities using multiple metrics
+            vol_similarity = abs(window_vol - recent_vol) / recent_vol
+            skew_similarity = abs(window_skew - recent_skew)
+            kurt_similarity = abs(window_kurt - recent_kurt)
+            
+            # Combine similarities with weights
+            total_similarity = (0.6 * vol_similarity + 
+                              0.25 * skew_similarity + 
+                              0.15 * kurt_similarity)
+            
+            # If combined similarity is good enough, include this window
+            if total_similarity < 0.3:  # Start with stricter threshold
+                regime_windows.append(i)
+        
+        # Ensure we have enough similar windows, if not, gradually relax constraint
+        similarity_threshold = 0.3
+        while len(regime_windows) < 20 and similarity_threshold < 1.0:
+            similarity_threshold += 0.1  # More gradual relaxation
+            regime_windows = []
+            for i in range(len(historical_returns) - lookback_window):
+                window_returns = historical_returns[i:i+lookback_window]
+                window_vol = np.std(window_returns)
+                window_skew = stats.skew(window_returns)
+                window_kurt = stats.kurtosis(window_returns)
+                
+                vol_similarity = abs(window_vol - recent_vol) / recent_vol
+                skew_similarity = abs(window_skew - recent_skew)
+                kurt_similarity = abs(window_kurt - recent_kurt)
+                
+                total_similarity = (0.6 * vol_similarity + 
+                                  0.25 * skew_similarity + 
+                                  0.15 * kurt_similarity)
+                
+                if total_similarity < similarity_threshold:
+                    regime_windows.append(i)
         
         # Initialize paths array
         paths = np.zeros((n_paths, n_steps))
         
-        # Generate paths by direct sampling
+        # Generate paths by sampling from similar regimes
         for i in range(n_paths):
-            # Directly sample from historical returns
-            path_returns = np.random.choice(
-                historical_returns,
-                size=n_steps,
-                replace=True  # Allow replacement to maintain distribution
-            )
+            # Randomly select a similar regime window
+            if regime_windows:
+                start_idx = np.random.choice(regime_windows)
+                # Get n_steps returns from this regime
+                regime_returns = historical_returns[start_idx:start_idx+lookback_window]
+                # Randomly select a continuous segment of length n_steps
+                segment_start = np.random.randint(0, len(regime_returns) - n_steps)
+                path_returns = regime_returns[segment_start:segment_start+n_steps]
+            else:
+                # Fallback to recent returns if no similar regimes found
+                path_returns = np.random.choice(recent_returns, size=n_steps, replace=True)
             
             # Convert returns to price path
             paths[i] = self.prices[-1] * np.exp(np.cumsum(path_returns))
@@ -347,29 +437,62 @@ class FractalSimulator:
             centroids.append(np.mean(cluster_paths, axis=0))
             cluster_sizes[i] = len(cluster_paths)
         
-        # Compare with patterns and compute scores
+        # Compare with patterns across timeframes and compute scores
         cluster_scores = np.zeros(n_clusters)
         pattern_matches = []
         
-        if self.patterns:
-            for pattern in self.patterns:
-                pattern_returns = np.diff(np.log(
-                    self.prices[pattern['start']:pattern['start']+pattern['length']]
-                ))
-                
-                for j in range(n_clusters):
-                    cluster_returns = np.diff(np.log(centroids[j]))
-                    if len(cluster_returns) >= len(pattern_returns):
-                        corr = self._compute_path_pattern_similarity(
-                            cluster_returns, pattern_returns
-                        )
-                        cluster_scores[j] = max(cluster_scores[j], corr)
-                        if corr > 0.7:
-                            pattern_matches.append({
-                                'cluster': j,
-                                'pattern_start': pattern['start'],
-                                'similarity': corr
-                            })
+        # Get patterns for each timeframe
+        patterns_by_timeframe = self.patterns  # Now a dict of timeframe -> patterns
+        
+        for j in range(n_clusters):
+            cluster_returns = np.diff(np.log(centroids[j]))
+            cluster_prices = centroids[j]
+            
+            # Get similarities across all timeframes
+            similarities = self._compute_path_pattern_similarity(
+                cluster_returns,
+                cluster_prices,
+                patterns_by_timeframe
+            )
+            
+            # Weight the timeframes (more weight to shorter timeframes)
+            weighted_sim = (0.5 * similarities.get('daily', 0) +
+                          0.3 * similarities.get('weekly', 0) +
+                          0.2 * similarities.get('monthly', 0))
+            
+            cluster_scores[j] = weighted_sim
+            
+            # Record significant pattern matches
+            if weighted_sim > 0.8:
+                # Find the best matching pattern from each timeframe
+                for tf_name, patterns in patterns_by_timeframe.items():
+                    best_match = None
+                    best_sim = 0
+                    
+                    for pattern in patterns:
+                        pattern_returns = np.diff(np.log(
+                            self.prices[pattern['start']:pattern['start']+pattern['length']]
+                        ))
+                        
+                        if len(cluster_returns) >= len(pattern_returns):
+                            sim = self._compute_path_pattern_similarity(
+                                cluster_returns[0:len(pattern_returns)],
+                                centroids[j][0:len(pattern_returns)+1],
+                                {tf_name: [pattern]}
+                            )[tf_name]
+                            
+                            if sim > best_sim:
+                                best_sim = sim
+                                best_match = pattern
+                    
+                    if best_match:
+                        pattern_matches.append({
+                            'cluster': j,
+                            'timeframe': tf_name,
+                            'pattern_start': best_match['start'],
+                            'pattern_length': best_match['length'],
+                            'similarity': best_sim
+                        })
         
         # Compute final probabilities
         size_probs = cluster_sizes / n_paths
@@ -381,25 +504,49 @@ class FractalSimulator:
         most_likely_cluster = np.argmax(cluster_probs)
         most_likely_path = centroids[most_likely_cluster]
         
-        # Generate probability cloud around most likely path
-        cloud_paths = np.zeros((cloud_paths, n_steps))
-        most_likely_returns = np.diff(np.log(most_likely_path))
+        # Generate probability cloud around most likely path using similar regime sampling
+        n_cloud_paths = cloud_paths  # Store the number since cloud_paths will be overwritten
+        cloud_paths = np.zeros((n_cloud_paths, n_steps))
         
-        # Use rolling windows of returns from the most likely path
-        window_size = 5
+        # Calculate path probabilities based on regime similarity
+        path_probabilities = np.zeros(n_cloud_paths)
+        
         for i in range(cloud_paths.shape[0]):
-            cloud_returns = np.zeros(n_steps)
-            for j in range(n_steps-1):
-                # Sample from nearby returns in the most likely path
-                start_idx = max(0, j - window_size)
-                end_idx = min(len(most_likely_returns), j + window_size)
-                local_returns = most_likely_returns[start_idx:end_idx]
+            if regime_windows:
+                # Sample from similar regime windows but add more noise
+                start_idx = np.random.choice(regime_windows)
+                regime_returns = historical_returns[start_idx:start_idx+lookback_window]
+                segment_start = np.random.randint(0, len(regime_returns) - n_steps)
+                base_returns = regime_returns[segment_start:segment_start+n_steps]
                 
-                # Add some noise based on historical volatility
-                sampled_return = np.random.choice(local_returns)
-                cloud_returns[j] = sampled_return + np.random.normal(0, np.std(local_returns) * 0.1)
+                # Add noise scaled by the regime's volatility
+                noise_scale = np.std(regime_returns) * 0.3  # 30% of regime volatility
+                cloud_returns = base_returns + np.random.normal(0, noise_scale, size=len(base_returns))
+            else:
+                # Fallback to sampling from recent returns with noise
+                cloud_returns = np.random.choice(recent_returns, size=n_steps, replace=True)
             
             cloud_paths[i] = self.prices[-1] * np.exp(np.cumsum(cloud_returns))
+            
+            # Calculate probability based on multiple factors:
+            # 1. Volatility similarity to recent regime
+            path_vol = np.std(cloud_returns)
+            vol_similarity = abs(path_vol - recent_vol) / recent_vol
+            
+            # 2. Return distribution similarity
+            path_skew = stats.skew(cloud_returns)
+            recent_skew = stats.skew(recent_returns)
+            skew_similarity = abs(path_skew - recent_skew)
+            
+            # Combine similarities with weights
+            total_similarity = (0.7 * vol_similarity + 0.3 * skew_similarity)
+            path_probabilities[i] = np.exp(-2 * total_similarity)  # Less aggressive decay
+        for i, path in enumerate(cloud_paths):
+            distance = np.mean(np.abs(path - most_likely_path))
+            path_probabilities[i] = np.exp(-distance / np.std(most_likely_path))
+        
+        # Normalize probabilities
+        path_probabilities = path_probabilities / np.sum(path_probabilities)
         
         return paths, {
             'labels': labels,
@@ -409,31 +556,104 @@ class FractalSimulator:
             'centroids': centroids,
             'cluster_probs': cluster_probs,
             'most_likely_path': most_likely_path,
-            'probability_cloud': cloud_paths
+            'probability_cloud': cloud_paths,
+            'path_probabilities': path_probabilities
         }
 
-    @staticmethod
-    @njit
-    def _compute_path_pattern_similarity(path_returns: np.ndarray, pattern_returns: np.ndarray) -> float:
-        """Compute similarity between a path and pattern."""
-        if len(path_returns) < len(pattern_returns):
-            return 0.0
-            
-        max_corr = 0.0
-        for i in range(len(path_returns) - len(pattern_returns)):
-            segment = path_returns[i:i+len(pattern_returns)]
-            
-            # Normalize both sequences
-            seg_std = np.std(segment)
-            pat_std = np.std(pattern_returns)
-            
-            if seg_std > 0 and pat_std > 0:
-                seg_norm = (segment - np.mean(segment)) / seg_std
-                pat_norm = (pattern_returns - np.mean(pattern_returns)) / pat_std
-                corr = np.corrcoef(seg_norm, pat_norm)[0,1]
-                max_corr = max(max_corr, corr)
+    def _compute_path_pattern_similarity(self, path_returns: np.ndarray, path_prices: np.ndarray, 
+                                         patterns_by_timeframe: Dict[str, List[Dict]]) -> Dict[str, float]:
+        """Compute similarity between a path and patterns across timeframes."""
+        similarities = {}
+        
+        # Calculate path characteristics
+        path_vol = np.std(path_returns)
+        path_scaled = StandardScaler().fit_transform(path_prices.reshape(-1, 1)).ravel()
+        path_fractal_dim = self.compute_box_dimension(
+            path_scaled,
+            min(5, len(path_prices)//4),
+            min(len(path_prices), len(path_prices)//2),
+            2
+        )
+        
+        # Handle patterns as a list
+        tf_similarities = []
+        
+        for pattern in patterns_by_timeframe:
+            # Skip if pattern is longer than path
+            if pattern['length'] > len(path_returns):
+                continue
                 
-        return max_corr
+            # Compare fractal dimensions
+            fractal_sim = 1 - abs(path_fractal_dim - pattern.get('fractal_dim', 0))
+            
+            # Compare volatilities
+            vol_sim = min(path_vol, pattern.get('volatility', 0)) / max(path_vol, pattern.get('volatility', 1e-8))
+            
+            # Look for pattern matches within the path
+            max_corr = 0.0
+            for i in range(len(path_returns) - pattern['length']):
+                segment = path_returns[i:i+pattern['length']]
+                seg_vol = np.std(segment)
+                    
+                if seg_vol > 0:
+                    # Normalize and compare
+                    seg_norm = (segment - np.mean(segment)) / seg_vol
+                    pat_norm = (path_returns[pattern['start']:pattern['start']+pattern['length']] - 
+                               np.mean(path_returns[pattern['start']:pattern['start']+pattern['length']])) / \
+                              pattern['volatility']
+                    
+                    corr = np.corrcoef(seg_norm, pat_norm)[0,1]
+                    max_corr = max(max_corr, corr)
+                
+                # Combine all similarity metrics
+                pattern_sim = (0.5 * max_corr + 
+                              0.3 * fractal_sim + 
+                              0.2 * vol_sim)
+                
+                tf_similarities.append(pattern_sim)
+            
+            # Use the maximum similarity found for this timeframe
+            if tf_similarities:
+                similarities[tf_name] = max(tf_similarities)
+            else:
+                similarities[tf_name] = 0.0
+        
+        return similarities
+
+    @staticmethod
+    def compute_box_dimension(data: np.ndarray, min_size: int, max_size: int, step: int) -> float:
+        """Compute the box-counting fractal dimension of a time series.
+        
+        Args:
+            data: Input time series
+            min_size: Minimum box size
+            max_size: Maximum box size
+            step: Step size for box scaling
+            
+        Returns:
+            Estimated fractal dimension
+        """
+        sizes = range(min_size, max_size + 1, step)
+        counts = []
+        
+        for size in sizes:
+            # Count number of boxes needed to cover the curve
+            boxes = set()
+            for i in range(len(data) - 1):
+                # Scale to box coordinates
+                x = i // size
+                y = int(data[i] / (max(data) - min(data)) * size)
+                boxes.add((x, y))
+            
+            counts.append(len(boxes))
+        
+        # Compute dimension from log-log plot
+        log_sizes = np.log([1/s for s in sizes])
+        log_counts = np.log(counts)
+        
+        # Linear regression
+        slope, _ = np.polyfit(log_sizes, log_counts, 1)
+        return slope
 
     def analyze_path_distributions(self, paths: np.ndarray) -> Dict:
         """Analyze the distribution of simulated paths."""
@@ -571,15 +791,46 @@ class FractalVisualizer:
             horizontal_spacing=0.1
         )
         
-        # Plot probability cloud
+        # Plot all paths with probability-based coloring
         cloud_paths = path_analysis['probability_cloud']
-        for i in range(0, len(cloud_paths), 5):
+        path_probs = path_analysis['path_probabilities']
+        
+        # Sort paths by probability
+        sort_idx = np.argsort(path_probs)
+        cloud_paths = cloud_paths[sort_idx]
+        path_probs = path_probs[sort_idx]
+        
+        # Find 95th percentile probability to identify top paths
+        prob_95th = np.percentile(path_probs, 95)
+        
+        # Plot paths from lowest to highest probability
+        for path, prob in zip(cloud_paths, path_probs):
+            # Aggressive exponential scaling to emphasize only the highest probability paths
+            # Scale relative to 95th percentile for better highlighting
+            rel_prob = (prob / prob_95th) ** 3  # Cube for more aggressive scaling
+            
+            if prob > prob_95th:
+                # Top 5% paths: Purple to Red transition
+                r = 1.0
+                b = max(0.0, 1.0 - (prob - prob_95th) / (np.max(path_probs) - prob_95th))
+                opacity = 0.8
+                width = 2.0
+            else:
+                # Bottom 95% paths: Light blue with very low opacity
+                r = 0.0
+                b = 1.0
+                opacity = 0.03 + 0.07 * rel_prob  # Very subtle
+                width = 0.5
+            
             fig.add_trace(
                 go.Scatter(
                     x=forecast_dates,
-                    y=np.concatenate([[historical_prices[-1]], cloud_paths[i]]),
-                    name='Cloud',
-                    line=dict(color='rgba(200,200,200,0.2)', width=1),
+                    y=np.concatenate([[historical_prices[-1]], path]),
+                    name=f'Path (p={prob:.1%})',
+                    line=dict(
+                        color=f'rgba({int(r*255)},0,{int(b*255)},{opacity})', 
+                        width=width
+                    ),
                     showlegend=False
                 ),
                 row=1, col=1

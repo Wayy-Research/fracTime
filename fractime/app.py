@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
-from sim import FractalAnalyzer, FractalSimulator, PathAnalyzer, FractalVisualizer, get_yahoo_data
+from fractime import FractalAnalyzer, FractalSimulator, PathAnalyzer, FractalVisualizer, get_yahoo_data
 
 def analyze_symbol(symbol: str, start_date: str) -> dict:
     """Analyze a single symbol."""
