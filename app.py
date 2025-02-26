@@ -355,8 +355,8 @@ def backtest_system():
             default=["Random Walk", "Simple Moving Average"]
         )
         
-        # Form submission button
-        submitted = st.form_submit_button("Run Backtest")
+        # Add an empty submit button that's not visible but allows form submission
+        st.form_submit_button("Hidden Submit", type="hidden")
     
     # Execution and status section
     status_area = st.empty()

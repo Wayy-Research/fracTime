@@ -34,6 +34,7 @@ dependencies = [
     "requests>=2.32.3",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.2",
+    "statsmodels>=0.14.4",
     "streamlit>=1.42.2",
     "yfinance>=0.2.54",
 ]
