@@ -10,8 +10,10 @@ from .core import (
     FractalSimulator,
     PathAnalyzer,
     FractalVisualizer,
-    get_yahoo_data
+    get_yahoo_data,
+    run_backtest
 )
+from .quantum import MultidimensionalFractalAnalyzer, QuantumPriceLevelGenerator, demo_quantum_fractal_analysis
 
 __version__ = "0.1.0"
 __all__ = [
@@ -19,5 +21,9 @@ __all__ = [
     'FractalSimulator',
     'PathAnalyzer',
     'FractalVisualizer',
-    'get_yahoo_data'
+    'get_yahoo_data',
+    'run_backtest',
+    'MultidimensionalFractalAnalyzer',
+    'QuantumPriceLevelGenerator',
+    'demo_quantum_fractal_analysis'
 ]

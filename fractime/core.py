@@ -14,46 +14,37 @@ from typing import Tuple, List as PyList, Dict
 import warnings
 import yfinance as yf
 import pandas as pd
+from fractime.optimization import compute_box_dimension_safe
+from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings('ignore')
 
-def get_yahoo_data(symbol: str, start_date: str) -> pl.DataFrame:
-    """Get data from Yahoo Finance using yfinance."""
+def get_yahoo_data(symbol: str, start_date: str, end_date: str = None) -> pd.DataFrame:
+    """Get historical price data from Yahoo Finance."""
     try:
-        # Get data using yfinance
+        # If no end date is provided, use current date
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            
+        # Get data from yfinance
         ticker = yf.Ticker(symbol)
-        df = ticker.history(start=start_date)
+        data = ticker.history(start=start_date, end=end_date)
         
-        if df.empty:
-            raise ValueError("No data returned from Yahoo Finance")
+        # Reset index to make Date a column
+        data = data.reset_index()
+        
+        # Ensure we have the expected columns
+        if 'Date' not in data.columns or 'Close' not in data.columns:
+            raise ValueError(f"Required columns not found in data for {symbol}")
             
-        # Convert pandas DataFrame to Polars
-        df = df.reset_index()
-        df_pl = pl.from_pandas(df)
+        # Handle any missing values
+        data = data.dropna(subset=['Close'])
         
-        # Select only required columns
-        df_pl = df_pl.select(['Date', 'Close'])
-        
-        # Verify the data
-        if df_pl.shape[0] == 0:
-            raise ValueError("No rows in DataFrame")
-            
-        return df_pl
+        # Return the processed dataframe
+        return data
         
     except Exception as e:
-        print(f"Error fetching data for {symbol}: {str(e)}")
-        # Return some sample data for testing
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.now()
-        days = (end_date - start_dt).days + 1
-        if days <= 0:
-            days = 30  # Fallback to 30 days of data if date range is invalid
-        dates = [start_dt + timedelta(days=x) for x in range(days)]
-        close = np.cumsum(np.random.normal(0, 1, days)) + 100
-        
-        return pl.DataFrame({
-            'Date': dates,
-            'Close': close
-        })
+        print(f"Error fetching data for {symbol}: {e}")
+        raise
 
 @njit
 def compute_rs(returns: np.ndarray, lag: int) -> float:
@@ -121,87 +112,156 @@ def compute_box_dimension(scaled_prices: np.ndarray, min_window: int, max_window
     
     return np.mean(dimensions)
 
-class FractalAnalyzer:
-    """Optimized fractal pattern analyzer."""
-    
-    def __init__(self, min_window: int = 10, max_window: int = 250):
-        self.min_window = min_window
-        self.max_window = max_window
-    
-    def analyze_patterns(self, prices: np.ndarray) -> Dict:
-        if not isinstance(prices, np.ndarray):
-            prices = np.array(prices)
-            
-        if len(prices.shape) != 1:
-            prices = prices.ravel()
-            
-        if len(prices) < self.min_window:
-            raise ValueError(f"Not enough data points. Need at least {self.min_window}, got {len(prices)}")
-            
-        results = {}
+@njit
+def compute_box_dimension_safe(scaled_prices: np.ndarray, min_window: int, max_window: int, step: int) -> float:
+    """Box-counting dimension calculation with safety checks."""
+    if step <= 0:
+        step = 1
         
-        try:
-            # Compute Hurst exponent
-            results['hurst'] = compute_hurst_exponent(
-                prices, 
-                self.min_window, 
-                self.max_window
-            )
+    num_scales = (max_window - min_window) // step
+    if num_scales <= 0:
+        return 1.5  # Default value
+        
+    dimensions = np.empty(num_scales)
+    valid_count = 0
+    
+    for i, scale in enumerate(range(min_window, max_window, step)):
+        if scale <= 0:  # Skip invalid scales
+            continue
             
-            # Compute fractal dimension
-            # Reshape to 2D array for StandardScaler
-            prices_2d = prices.reshape(-1, 1)
-            if np.all(prices_2d == prices_2d[0]):
-                # If all prices are the same, add tiny noise to avoid scaling issues
-                prices_2d = prices_2d + np.random.normal(0, 1e-8, prices_2d.shape)
+        boxes = np.ceil(scaled_prices * scale)
+        unique_boxes = len(np.unique(boxes))
+        
+        if unique_boxes > 0 and scale > 0:  # Safety check
+            dimensions[valid_count] = np.log(unique_boxes) / np.log(scale)
+            valid_count += 1
+    
+    if valid_count > 0:
+        return np.mean(dimensions[:valid_count])
+    else:
+        return 1.5  # Default value
+
+class FractalAnalyzer:
+    """Analyzes fractal properties of time series data."""
+    
+    def __init__(self):
+        """Initialize with empty cache for performance."""
+        self.cache = {}  # Cache for expensive computations
+    
+    def analyze_patterns(self, prices: np.ndarray, full_analysis=True) -> dict:
+        """Analyze with caching and selective feature computation."""
+        # Generate a cache key based on the first/last/middle values and length
+        if len(prices) > 3:
+            cache_key = f"{len(prices)}_{prices[0]:.2f}_{prices[-1]:.2f}_{prices[len(prices)//2]:.2f}"
             
-            scaled_prices = StandardScaler().fit_transform(prices_2d).ravel()
-            results['fractal_dim'] = compute_box_dimension(
-                scaled_prices,
-                self.min_window,
-                self.max_window,
-                20
-            )
+            if cache_key in self.cache:
+                return self.cache[cache_key]
+        
+        results = {
+            'hurst': self.compute_hurst(prices),
+            'fractal_dim': self.compute_fractal_dimension(prices)  # Changed key to match existing code
+        }
+        
+        # Only compute expensive metrics when requested or for small datasets
+        if full_analysis or len(prices) < 1000:
+            results['self_similar_patterns'] = self._find_patterns(prices)
+        else:
+            # Use simplified patterns for backtesting
+            results['self_similar_patterns'] = self._find_simple_patterns(prices)
+        
+        # Cache the results for future use
+        if len(prices) > 3:
+            self.cache[cache_key] = results
             
-            # Find self-similar patterns
-            patterns = self._find_patterns(prices)
-            results['self_similar_patterns'] = patterns
-        except Exception as e:
-            print(f"Error in analyze_patterns: {str(e)}")
-            # Return safe default values
-            results = {
-                'hurst': 0.5,
-                'fractal_dim': 1.5,
-                'self_similar_patterns': []
-            }
-            
+            # Limit cache size to prevent memory issues
+            if len(self.cache) > 100:
+                # Remove a random key to keep cache size reasonable
+                self.cache.pop(next(iter(self.cache)))
+        
         return results
     
-    @staticmethod
-    def _find_patterns(prices: np.ndarray) -> list:
-        """Find self-similar patterns in price data."""
+    def _find_simple_patterns(self, prices: np.ndarray) -> list:
+        """Faster pattern detection for backtesting."""
         patterns = []
         returns = np.diff(np.log(prices))
         
-        for window in range(10, min(250, len(prices)//3)):
-            for i in range(len(prices)-window*2):
-                pattern1 = prices[i:i+window]
+        # Use fewer window sizes and skip many positions
+        window_sizes = [10, 20, 50]
+        max_patterns = 20
+        
+        for window in window_sizes:
+            if len(prices) < window * 2:
+                continue
+                
+            skip_size = max(1, len(prices) // (max_patterns * 2))
+            
+            for i in range(0, len(prices) - window * 2, skip_size):
+                if len(patterns) >= max_patterns:
+                    break
+                    
                 pattern1_returns = returns[i:i+window-1]
                 pattern1_vol = np.std(pattern1_returns)
-                pattern2 = prices[i+window:i+window*2]
-                pattern2_returns = returns[i+window:i+window*2-1]
-                pattern2_vol = np.std(pattern2_returns)
                 
-                # Skip if either pattern has zero volatility
-                if pattern1_vol == 0 or pattern2_vol == 0:
+                if pattern1_vol < 1e-8:
                     continue
                 
-                # Normalize patterns
-                pattern1_norm = (pattern1_returns - np.mean(pattern1_returns)) / pattern1_vol
-                pattern2_norm = (pattern2_returns - np.mean(pattern2_returns)) / pattern2_vol
+                patterns.append({
+                    'start': i,
+                    'length': window,
+                    'returns': pattern1_returns,
+                    'volatility': pattern1_vol,
+                    'similarity': 0.8,  # Default value
+                    'fractal_dim': 1.5  # Default value
+                })
+        
+        return patterns
+    
+    def _find_patterns(self, prices: np.ndarray) -> list:
+        """Optimized pattern detection."""
+        from fractime.optimization import compute_pattern_similarities
+        
+        patterns = []
+        returns = np.diff(np.log(prices))
+        
+        # Use fewer window sizes to reduce computation
+        min_window = 10
+        max_window = min(250, len(prices)//3)
+        window_step = max(1, (max_window - min_window) // 10)
+        window_sizes = range(min_window, max_window, window_step)
+        
+        # Pre-compute volatilities
+        volatilities = {}
+        for window in window_sizes:
+            rolling_vols = np.array([np.std(returns[i:i+window-1]) for i in range(len(returns)-window+1)])
+            volatilities[window] = rolling_vols
+        
+        # Sample fewer starting points
+        for window in window_sizes:
+            if len(patterns) >= 50:  # Limit total patterns
+                break
                 
-                # Compute similarity
-                similarity = np.corrcoef(pattern1_norm, pattern2_norm)[0,1]
+            step_size = max(1, window // 4)  # Skip positions to reduce computation
+            
+            for i in range(0, len(prices)-window*2, step_size):
+                # Use pre-computed volatilities
+                if i >= len(volatilities[window]) or i+window >= len(volatilities[window]):
+                    continue
+                    
+                pattern1_vol = volatilities[window][i]
+                pattern2_vol = volatilities[window][i+window]
+                
+                # Skip zero volatility patterns
+                if pattern1_vol < 1e-8 or pattern2_vol < 1e-8:
+                    continue
+                
+                # Get pattern returns
+                pattern1_returns = returns[i:i+window-1]
+                pattern2_returns = returns[i+window:i+window*2-1]
+                
+                # Use Numba-optimized similarity calculation
+                similarity = compute_pattern_similarities(
+                    pattern1_returns, pattern2_returns, pattern1_vol, pattern2_vol
+                )
                 
                 if similarity > 0.8:  # Only keep strong correlations
                     patterns.append({
@@ -210,15 +270,98 @@ class FractalAnalyzer:
                         'returns': pattern1_returns,
                         'volatility': pattern1_vol,
                         'similarity': similarity,
-                        'fractal_dim': compute_box_dimension(
-                            StandardScaler().fit_transform(pattern1.reshape(-1, 1)).ravel(),
-                            min(5, window//4),
-                            min(window, window//2),
-                            2
+                        'fractal_dim': self.compute_fractal_dimension(
+                            prices[i:i+window], 
+                            quick_mode=True
                         )
                     })
         
         return patterns
+    
+    def compute_fractal_dimension(self, prices: np.ndarray, quick_mode=False) -> float:
+        """Compute fractal dimension, optionally using a faster approximation."""
+        try:
+            if len(prices) < 10:  # Not enough points for meaningful calculation
+                return 1.5  # Return a reasonable default value
+                
+            if quick_mode:
+                # Fast approximation using fewer box sizes
+                r_min = 2
+                r_max = min(10, len(prices)//4)
+                step = 2
+            else:
+                # Full computation
+                r_min = 2
+                r_max = min(20, len(prices)//4) 
+                step = 1
+                
+            # Ensure we have at least one scale value
+            if r_min >= r_max:
+                return 1.5
+                
+            # Transform prices for scaling
+            try:
+                scaled_prices = StandardScaler().fit_transform(prices.reshape(-1, 1)).ravel()
+            except:
+                # If scaling fails, use min-max normalization
+                min_price = np.min(prices)
+                max_price = np.max(prices)
+                if max_price == min_price:  # Avoid division by zero
+                    return 1.0  # Straight line has dimension 1
+                scaled_prices = (prices - min_price) / (max_price - min_price)
+                
+            # Safe computation of fractal dimension
+            return compute_box_dimension_safe(scaled_prices, r_min, r_max, step)
+        except Exception as e:
+            print(f"Error computing fractal dimension: {e}")
+            return 1.5  # Reasonable default
+    
+    def get_patterns(self, prices: np.ndarray, max_patterns=20) -> list:
+        """Extract patterns efficiently with sampling."""
+        window_sizes = [10, 20, 30]  # Different pattern lengths to extract
+        patterns = []
+        
+        # For longer series, use sampling to avoid excessive patterns
+        if len(prices) > 1000:
+            skip_factor = len(prices) // 500
+        else:
+            skip_factor = 1
+            
+        for window in window_sizes:
+            # Step back with larger jumps for efficiency
+            step_size = max(1, window // 2)
+            
+            for i in range(len(prices) - window, 0, -step_size * skip_factor):
+                if i >= window:
+                    # Extract the pattern segment
+                    pattern = prices[i-window:i]
+                    if len(pattern) == window:  # Ensure we have a complete pattern
+                        patterns.append(pattern)
+                        
+                # Stop if we have enough patterns
+                if len(patterns) >= max_patterns // len(window_sizes):
+                    break
+        
+        # Print some info about patterns found
+        print(f"Extracted {len(patterns)} patterns from price data")
+            
+        return patterns
+
+    def compute_hurst(self, prices: np.ndarray) -> float:
+        """Compute the Hurst exponent for a price series."""
+        if len(prices) < 20:
+            # Not enough data for reliable calculation
+            return 0.5
+        
+        try:
+            # Use the existing compute_hurst_exponent function
+            min_lag = 10
+            max_lag = min(250, len(prices) // 2)
+            return compute_hurst_exponent(prices, min_lag, max_lag)
+        except Exception as e:
+            print(f"Error computing Hurst exponent: {e}")
+            # Return 0.5 as a default (random walk)
+            return 0.5
 
 class FractalSimulator:
     """Generates paths based on fractal patterns and historical distributions."""
@@ -229,6 +372,15 @@ class FractalSimulator:
         self.patterns = None
         self.hurst = None
         self._analyze()
+        
+        # Prepare sampled data for faster simulations
+        if len(self.prices) > 1000:
+            # Create downsampled version for faster regime matching
+            sampling_rate = len(self.prices) // 1000
+            self.sampled_prices = self.prices[::sampling_rate]
+            print(f"Created downsampled data: {len(self.sampled_prices)} points")
+        else:
+            self.sampled_prices = self.prices
     
     def _analyze(self):
         """Perform initial analysis."""
@@ -341,7 +493,8 @@ class FractalSimulator:
         n_steps: int,
         n_paths: int = 1000,
         pattern_weight: float = 0.3,
-        cloud_paths: int = 200
+        cloud_paths: int = 200,
+        preserve_volatility: bool = True
     ) -> Tuple[np.ndarray, Dict]:
         """Generate paths using regime-matched sampling based on recent volatility."""
         # Get historical returns
@@ -441,62 +594,50 @@ class FractalSimulator:
         cluster_scores = np.zeros(n_clusters)
         pattern_matches = []
         
-        # Get patterns for each timeframe
-        patterns_by_timeframe = self.patterns  # Now a dict of timeframe -> patterns
+        # Find similar patterns in historical data
+        patterns = self.analyzer.get_patterns(self.prices)
         
-        for j in range(n_clusters):
-            cluster_returns = np.diff(np.log(centroids[j]))
-            cluster_prices = centroids[j]
-            
-            # Get similarities across all timeframes
-            similarities = self._compute_path_pattern_similarity(
-                cluster_returns,
-                cluster_prices,
-                patterns_by_timeframe
-            )
-            
-            # Weight the timeframes (more weight to shorter timeframes)
-            weighted_sim = (0.5 * similarities.get('daily', 0) +
-                          0.3 * similarities.get('weekly', 0) +
-                          0.2 * similarities.get('monthly', 0))
-            
-            cluster_scores[j] = weighted_sim
-            
-            # Record significant pattern matches
-            if weighted_sim > 0.8:
-                # Find the best matching pattern from each timeframe
-                for tf_name, patterns in patterns_by_timeframe.items():
-                    best_match = None
-                    best_sim = 0
-                    
-                    for pattern in patterns:
-                        pattern_returns = np.diff(np.log(
-                            self.prices[pattern['start']:pattern['start']+pattern['length']]
-                        ))
-                        
-                        if len(cluster_returns) >= len(pattern_returns):
-                            sim = self._compute_path_pattern_similarity(
-                                cluster_returns[0:len(pattern_returns)],
-                                centroids[j][0:len(pattern_returns)+1],
-                                {tf_name: [pattern]}
-                            )[tf_name]
-                            
-                            if sim > best_sim:
-                                best_sim = sim
-                                best_match = pattern
-                    
-                    if best_match:
-                        pattern_matches.append({
-                            'cluster': j,
-                            'timeframe': tf_name,
-                            'pattern_start': best_match['start'],
-                            'pattern_length': best_match['length'],
-                            'similarity': best_sim
-                        })
+        # Get pattern similarity - fix the call to match our updated method
+        try:
+            # Check what type of patterns we're working with
+            if isinstance(patterns, dict):
+                # Handle dictionary of patterns by timeframe (original structure)
+                similarities_by_timeframe = {}
+                for timeframe, timeframe_patterns in patterns.items():
+                    # Convert each timeframe's patterns to array form if needed
+                    pattern_arrays = []
+                    for pattern in timeframe_patterns:
+                        if 'start' in pattern and 'length' in pattern:
+                            # Extract the actual price segment for this pattern
+                            start = pattern['start']
+                            length = pattern['length']
+                            if start + length <= len(self.prices):
+                                pattern_arrays.append(self.prices[start:start+length])
+                
+                    # Compute similarity for this timeframe's patterns
+                    if pattern_arrays:
+                        similarities_by_timeframe[timeframe] = np.mean(
+                            self._compute_path_pattern_similarity(self.prices, pattern_arrays)
+                        )
+                    else:
+                        similarities_by_timeframe[timeframe] = 0.0
+                
+                # Calculate weighted average across timeframes (original logic)
+                weighted_similarity = (0.5 * similarities_by_timeframe.get('daily', 0) +
+                                     0.3 * similarities_by_timeframe.get('weekly', 0) +
+                                     0.2 * similarities_by_timeframe.get('monthly', 0))
+            else:
+                # Handle direct list of pattern arrays (new structure)
+                similarities = self._compute_path_pattern_similarity(self.prices, patterns)
+                weighted_similarity = np.mean(similarities) if len(similarities) > 0 else 0.0
+        except Exception as e:
+            print(f"Error computing pattern similarity: {e}")
+            weighted_similarity = 0.0  # Fallback to zero similarity
         
-        # Compute final probabilities
+        cluster_scores = weighted_similarity * np.ones(n_clusters)
+        
+        # Calculate final probabilities
         size_probs = cluster_sizes / n_paths
-        pattern_weight = 0.4  # Weight for pattern matching vs cluster size
         combined_scores = (1 - pattern_weight) * size_probs + pattern_weight * cluster_scores
         cluster_probs = combined_scores / np.sum(combined_scores)
         
@@ -548,6 +689,29 @@ class FractalSimulator:
         # Normalize probabilities
         path_probabilities = path_probabilities / np.sum(path_probabilities)
         
+        # Before returning paths, ensure volatility matches historical data
+        if preserve_volatility:
+            # Calculate historical volatility (day-to-day changes)
+            hist_diffs = np.diff(np.log(self.prices))
+            hist_std = np.std(hist_diffs)
+            
+            # Calculate forecast volatility
+            forecast_diffs = np.diff(np.log(paths), axis=1)
+            forecast_std = np.mean([np.std(path_diffs) for path_diffs in forecast_diffs])
+            
+            # If forecast is too smooth, add appropriate noise
+            if forecast_std < 0.8 * hist_std:  # Allow some smoothing, but not too much
+                print(f"Adjusting volatility from {forecast_std:.5f} to {hist_std:.5f}")
+                volatility_factor = hist_std / forecast_std
+                
+                # Add scaled noise to maintain proper volatility
+                for i in range(paths.shape[0]):
+                    for j in range(1, paths.shape[1]):
+                        # Generate noise with same distribution as historical data
+                        noise = np.random.choice(hist_diffs) * 0.5  # Scale down slightly for stability
+                        # Apply noise multiplicatively
+                        paths[i, j] *= np.exp(noise)
+        
         return paths, {
             'labels': labels,
             'cluster_weights': cluster_scores,
@@ -560,63 +724,76 @@ class FractalSimulator:
             'path_probabilities': path_probabilities
         }
 
-    def _compute_path_pattern_similarity(self, path_returns: np.ndarray, path_prices: np.ndarray, 
-                                         patterns_by_timeframe: Dict[str, List[Dict]]) -> Dict[str, float]:
-        """Compute similarity between a path and patterns across timeframes."""
-        similarities = {}
+    def _compute_path_pattern_similarity(self, prices: np.ndarray, patterns: list) -> np.ndarray:
+        """Compute similarity between a price path and known patterns."""
+        n_patterns = len(patterns)
         
-        # Calculate path characteristics
-        path_vol = np.std(path_returns)
-        path_scaled = StandardScaler().fit_transform(path_prices.reshape(-1, 1)).ravel()
-        path_fractal_dim = self.compute_box_dimension(
-            path_scaled,
-            min(5, len(path_prices)//4),
-            min(len(path_prices), len(path_prices)//2),
-            2
-        )
+        # If no patterns, return zero similarities
+        if n_patterns == 0:
+            return np.zeros(0)
         
-        # Handle patterns as a list
-        tf_similarities = []
+        similarities = np.zeros(n_patterns)
         
-        for pattern in patterns_by_timeframe:
-            # Skip if pattern is longer than path
-            if pattern['length'] > len(path_returns):
+        # For each pattern
+        for i, pattern in enumerate(patterns):
+            # If pattern is empty or too short, skip it
+            if len(pattern) == 0 or len(pattern) < 2:
+                similarities[i] = 0
                 continue
-                
-            # Compare fractal dimensions
-            fractal_sim = 1 - abs(path_fractal_dim - pattern.get('fractal_dim', 0))
             
-            # Compare volatilities
-            vol_sim = min(path_vol, pattern.get('volatility', 0)) / max(path_vol, pattern.get('volatility', 1e-8))
+            # Skip if prices array is too short
+            if len(prices) < 2:
+                similarities[i] = 0
+                continue
             
-            # Look for pattern matches within the path
-            max_corr = 0.0
-            for i in range(len(path_returns) - pattern['length']):
-                segment = path_returns[i:i+pattern['length']]
-                seg_vol = np.std(segment)
-                    
-                if seg_vol > 0:
-                    # Normalize and compare
-                    seg_norm = (segment - np.mean(segment)) / seg_vol
-                    pat_norm = (path_returns[pattern['start']:pattern['start']+pattern['length']] - 
-                               np.mean(path_returns[pattern['start']:pattern['start']+pattern['length']])) / \
-                              pattern['volatility']
-                    
-                    corr = np.corrcoef(seg_norm, pat_norm)[0,1]
-                    max_corr = max(max_corr, corr)
-                
-                # Combine all similarity metrics
-                pattern_sim = (0.5 * max_corr + 
-                              0.3 * fractal_sim + 
-                              0.2 * vol_sim)
-                
-                tf_similarities.append(pattern_sim)
+            # Normalize pattern to [0, 1] range
+            pat_min = np.min(pattern)
+            pat_max = np.max(pattern)
             
-            # Use the maximum similarity found for this timeframe
-            if tf_similarities:
-                similarities[tf_name] = max(tf_similarities)
+            # Avoid division by zero
+            if pat_max == pat_min:
+                pat_norm = np.zeros_like(pattern)
             else:
-                similarities[tf_name] = 0.0
+                pat_norm = (pattern - pat_min) / (pat_max - pat_min)
+            
+            # Ensure pattern is long enough
+            min_segment = 10  # Minimum segment length for correlation
+            
+            # Use maximum possible segment length
+            segment_len = min(min_segment, len(pattern), len(prices))
+            
+            # Get segment of prices of the same length as pattern
+            segment = prices[-segment_len:]
+            
+            # Ensure pat_norm is the right length too
+            pat_norm = pat_norm[-segment_len:]
+            
+            # Normalize segment to [0, 1] range
+            seg_min = np.min(segment)
+            seg_max = np.max(segment)
+            
+            # Avoid division by zero
+            if seg_max == seg_min:
+                seg_norm = np.zeros_like(segment)
+            else:
+                seg_norm = (segment - seg_min) / (seg_max - seg_min)
+            
+            # Compute correlation between normalized segment and pattern
+            # Add error handling for the correlation coefficient calculation
+            try:
+                if len(seg_norm) > 1 and len(pat_norm) > 1:
+                    corr = np.corrcoef(seg_norm, pat_norm)[0,1]
+                    if np.isnan(corr):
+                        corr = 0  # Handle NaN correlations
+                else:
+                    corr = 0  # Not enough data for correlation
+                
+                # Scale to similarity: 1 is perfect match, 0 is no match
+                similarities[i] = max(0, corr)  # Only positive correlations count as similarity
+            except Exception as e:
+                print(f"Error in correlation calculation: {e}")
+                print(f"Segment shape: {seg_norm.shape}, Pattern shape: {pat_norm.shape}")
+                similarities[i] = 0
         
         return similarities
 
@@ -714,6 +891,110 @@ class FractalSimulator:
         fbm = fbm / np.std(fbm)
         return fbm
 
+    def simulate_paths_fast(self, n_steps, n_paths=100):
+        """Faster path simulation for backtesting with fewer paths."""
+        # Simplified version with fewer paths and calculations
+        historical_returns = np.diff(np.log(self.prices))
+        recent_returns = historical_returns[-min(len(historical_returns), 30):]
+        
+        # Use simple sampling with bootstrapping instead of complex regime matching
+        sampled_indices = np.random.choice(
+            len(recent_returns), 
+            size=(n_paths, n_steps), 
+            replace=True
+        )
+        
+        # Generate paths based on sampled returns
+        paths = np.zeros((n_paths, n_steps + 1))
+        paths[:, 0] = self.prices[-1]  # Start with last price
+        
+        for i in range(n_steps):
+            # Use the sampled returns for each path
+            step_returns = recent_returns[sampled_indices[:, i]]
+            paths[:, i+1] = paths[:, i] * np.exp(step_returns)
+        
+        # Calculate key statistics
+        mean_path = np.mean(paths, axis=0)
+        median_path = np.median(paths, axis=0)
+        upper_95 = np.percentile(paths, 95, axis=0)
+        lower_5 = np.percentile(paths, 5, axis=0)
+        
+        # Find most likely path (closest to mean)
+        path_diffs = np.sum((paths - mean_path) ** 2, axis=1)
+        most_likely_idx = np.argmin(path_diffs)
+        most_likely_path = paths[most_likely_idx]
+        
+        # Simple analysis with mean path and percentiles
+        path_analysis = {
+            'mean_path': mean_path,
+            'median_path': median_path,
+            'most_likely_path': most_likely_path,
+            'upper_95': upper_95,
+            'lower_5': lower_5
+        }
+        
+        return paths, path_analysis
+        
+    def simulate_paths_gpu(self, n_steps, n_paths=1000):
+        """GPU-accelerated path simulation."""
+        from fractime.optimization import try_import_cupy
+        
+        # Try to import cupy for GPU acceleration
+        cp = try_import_cupy()
+        
+        if cp is None:
+            print("GPU acceleration not available, falling back to CPU")
+            return self.simulate_paths_fast(n_steps, n_paths)
+        
+        try:
+            # Calculate returns
+            historical_returns = np.diff(np.log(self.prices))
+            recent_returns = historical_returns[-min(len(historical_returns), 30):]
+            
+            # Move data to GPU
+            recent_returns_gpu = cp.array(recent_returns)
+            
+            # Generate paths on GPU
+            paths_gpu = cp.zeros((n_paths, n_steps + 1))
+            paths_gpu[:, 0] = self.prices[-1]
+            
+            # Generate random indices on GPU for bootstrapping
+            indices = cp.random.randint(0, len(recent_returns), (n_paths, n_steps))
+            
+            # Use GPU for path generation
+            for i in range(n_steps):
+                returns = recent_returns_gpu[indices[:, i]]
+                paths_gpu[:, i+1] = paths_gpu[:, i] * cp.exp(returns)
+            
+            # Move results back to CPU
+            paths = cp.asnumpy(paths_gpu)
+            
+            # Compute statistics on CPU using NumPy
+            mean_path = np.mean(paths, axis=0)
+            median_path = np.median(paths, axis=0)
+            upper_95 = np.percentile(paths, 95, axis=0)
+            lower_5 = np.percentile(paths, 5, axis=0)
+            
+            # Find most likely path (closest to mean)
+            path_diffs = np.sum((paths - mean_path) ** 2, axis=1)
+            most_likely_idx = np.argmin(path_diffs)
+            most_likely_path = paths[most_likely_idx]
+            
+            # Analysis results
+            path_analysis = {
+                'mean_path': mean_path,
+                'median_path': median_path, 
+                'most_likely_path': most_likely_path,
+                'upper_95': upper_95,
+                'lower_5': lower_5
+            }
+            
+            return paths, path_analysis
+            
+        except Exception as e:
+            print(f"GPU simulation failed: {e}, falling back to CPU")
+            return self.simulate_paths_fast(n_steps, n_paths)
+
 class PathAnalyzer:
     """Analyzes and clusters simulation paths."""
     
@@ -765,6 +1046,9 @@ class FractalVisualizer:
         """Create comprehensive visualization with return distribution comparison."""
         paths, path_analysis = simulation_results
         
+        # For very large path counts, use density visualization instead of individual paths
+        use_density_plot = paths.shape[0] > 5000
+        
         # Create future dates for forecast
         last_date = dates[-1]
         forecast_dates = pd.date_range(
@@ -791,51 +1075,6 @@ class FractalVisualizer:
             horizontal_spacing=0.1
         )
         
-        # Plot all paths with probability-based coloring
-        cloud_paths = path_analysis['probability_cloud']
-        path_probs = path_analysis['path_probabilities']
-        
-        # Sort paths by probability
-        sort_idx = np.argsort(path_probs)
-        cloud_paths = cloud_paths[sort_idx]
-        path_probs = path_probs[sort_idx]
-        
-        # Find 95th percentile probability to identify top paths
-        prob_95th = np.percentile(path_probs, 95)
-        
-        # Plot paths from lowest to highest probability
-        for path, prob in zip(cloud_paths, path_probs):
-            # Aggressive exponential scaling to emphasize only the highest probability paths
-            # Scale relative to 95th percentile for better highlighting
-            rel_prob = (prob / prob_95th) ** 3  # Cube for more aggressive scaling
-            
-            if prob > prob_95th:
-                # Top 5% paths: Purple to Red transition
-                r = 1.0
-                b = max(0.0, 1.0 - (prob - prob_95th) / (np.max(path_probs) - prob_95th))
-                opacity = 0.8
-                width = 2.0
-            else:
-                # Bottom 95% paths: Light blue with very low opacity
-                r = 0.0
-                b = 1.0
-                opacity = 0.03 + 0.07 * rel_prob  # Very subtle
-                width = 0.5
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=forecast_dates,
-                    y=np.concatenate([[historical_prices[-1]], path]),
-                    name=f'Path (p={prob:.1%})',
-                    line=dict(
-                        color=f'rgba({int(r*255)},0,{int(b*255)},{opacity})', 
-                        width=width
-                    ),
-                    showlegend=False
-                ),
-                row=1, col=1
-            )
-        
         # Plot historical prices
         fig.add_trace(
             go.Scatter(
@@ -847,56 +1086,193 @@ class FractalVisualizer:
             row=1, col=1
         )
         
-        # Plot most likely path
-        most_likely = path_analysis['most_likely_path']
-        prob = path_analysis["cluster_probs"][np.argmax(path_analysis["cluster_probs"])]
-        fig.add_trace(
-            go.Scatter(
-                x=forecast_dates,
-                y=np.concatenate([[historical_prices[-1]], most_likely]),
-                name=f'Most Likely Path ({prob:.0%})',
-                line=dict(color='red', width=3)
-            ),
-            row=1, col=1
-        )
-        
-        # Pattern matches plot
-        if path_analysis['pattern_matches']:
-            for match in path_analysis['pattern_matches']:
-                start = match['pattern_start']
-                cluster = match['cluster']
-                sim = match['similarity']
+        if use_density_plot:
+            # DENSITY VISUALIZATION APPROACH - with professional styling and preserved volatility
+            
+            # First, select a few representative paths to show the jaggedness
+            num_sample_paths = 3  # Show a few sample paths
+            if paths.shape[0] > num_sample_paths:
+                # Get some diverse paths by sampling from different percentiles
+                sample_indices = []
+                for p in np.linspace(25, 75, num_sample_paths):
+                    # Find path closest to this percentile at the end point
+                    target_value = np.percentile(paths[:, -1], p)
+                    idx = np.argmin(np.abs(paths[:, -1] - target_value))
+                    sample_indices.append(idx)
                 
-                pattern_dates = dates[start:start+20]
+                sample_paths = paths[sample_indices]
+            
+            # Calculate percentiles at each time step
+            percentiles = [5, 25, 50, 75, 95]
+            percentile_paths = np.zeros((len(percentiles), paths.shape[1]))
+            
+            for t in range(paths.shape[1]):
+                percentile_paths[:, t] = np.percentile(paths[:, t], percentiles)
+            
+            # Plot the 90% confidence band with shading
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], percentile_paths[4]]),  # 95th
+                    name='95th percentile',
+                    line=dict(width=0.5, color='rgba(255,82,82,0.0)'),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], percentile_paths[0]]),  # 5th
+                    name='5th percentile',
+                    fill='tonexty',
+                    fillcolor='rgba(255,82,82,0.15)',  # Very light red
+                    line=dict(width=0.5, color='rgba(255,82,82,0.0)'),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], percentile_paths[3]]),  # 75th
+                    name='75th percentile',
+                    line=dict(width=0.5, color='rgba(255,82,82,0.0)'),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], percentile_paths[1]]),  # 25th
+                    name='25th percentile',
+                    fill='tonexty',
+                    fillcolor='rgba(255,82,82,0.3)',  # Medium light red
+                    line=dict(width=0.5, color='rgba(255,82,82,0.0)'),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], percentile_paths[2]]),  # 50th
+                    name='Median forecast',
+                    line=dict(color='rgb(255,82,82)', width=2)  # Solid red line
+                ),
+                row=1, col=1
+            )
+            
+            # Add sample jagged paths to show volatility
+            for i, path in enumerate(sample_paths):
                 fig.add_trace(
                     go.Scatter(
-                        x=pattern_dates,
-                        y=historical_prices[start:start+20],
-                        name=f'Pattern (sim={sim:.2f})',
-                        line=dict(dash='dot')
+                        x=forecast_dates,
+                        y=np.concatenate([[historical_prices[-1]], path]),
+                        name=f'Sample path {i+1}',
+                        opacity=0.7,
+                        line=dict(color='rgba(255,82,82,0.7)', width=0.7, dash='dot'),
+                        showlegend=(i==0)  # Only show one in legend
                     ),
-                    row=2, col=1
+                    row=1, col=1
+                )
+            
+            # Plot most likely path if available and different from median
+            if 'most_likely_path' in path_analysis:
+                most_likely = path_analysis['most_likely_path']
+                # Only add if it's significantly different from the median
+                median_path = percentile_paths[2]
+                if np.mean(np.abs(most_likely - median_path)) > 0.01 * np.mean(median_path):
+                    if 'cluster_probs' in path_analysis:
+                        prob = path_analysis["cluster_probs"][np.argmax(path_analysis["cluster_probs"])]
+                    else:
+                        prob = np.max(path_analysis['path_probabilities'])
+                        
+                    fig.add_trace(
+                        go.Scatter(
+                            x=forecast_dates,
+                            y=np.concatenate([[historical_prices[-1]], most_likely]),
+                            name=f'Most likely path ({prob:.0%})',
+                            line=dict(color='rgb(128,0,0)', width=2, dash='dot')  # Darker red, dotted
+                        ),
+                        row=1, col=1
+                    )
+        else:
+            # INDIVIDUAL PATHS APPROACH - for when there are fewer paths
+            # Plot all paths with probability-based coloring
+            cloud_paths = paths
+            path_probs = path_analysis['path_probabilities']
+            
+            # Sort paths by probability
+            sort_idx = np.argsort(path_probs)
+            cloud_paths = cloud_paths[sort_idx]
+            path_probs = path_probs[sort_idx]
+            
+            # Find 95th percentile probability to identify top paths
+            prob_95th = np.percentile(path_probs, 95)
+            
+            # Plot paths from lowest to highest probability
+            for i, path in enumerate(cloud_paths):
+                prob = path_probs[i]
+                
+                # Aggressive exponential scaling to emphasize only the highest probability paths
+                # Scale relative to 95th percentile for better highlighting
+                rel_prob = (prob / prob_95th) ** 3  # Cube for more aggressive scaling
+                
+                if prob > prob_95th:
+                    # Top 5% paths: Purple to Red transition
+                    r = 1.0
+                    b = max(0.0, 1.0 - (prob - prob_95th) / (np.max(path_probs) - prob_95th))
+                    opacity = 0.8
+                    width = 2.0
+                else:
+                    # Bottom 95% paths: Light blue with very low opacity
+                    r = 0.0
+                    b = 1.0
+                    opacity = 0.03 + 0.07 * rel_prob  # Very subtle
+                    width = 0.5
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=forecast_dates,
+                        y=np.concatenate([[historical_prices[-1]], path]),
+                        name=f'Path (p={prob:.1%})',
+                        line=dict(
+                            color=f'rgba({int(r*255)},0,{int(b*255)},{opacity})', 
+                            width=width
+                        ),
+                        showlegend=False
+                    ),
+                    row=1, col=1
+                )
+            
+            # Plot most likely path if available
+            if 'most_likely_path' in path_analysis:
+                most_likely = path_analysis['most_likely_path']
+                if 'cluster_probs' in path_analysis:
+                    prob = path_analysis["cluster_probs"][np.argmax(path_analysis["cluster_probs"])]
+                else:
+                    prob = np.max(path_probs)
+                    
+                fig.add_trace(
+                    go.Scatter(
+                        x=forecast_dates,
+                        y=np.concatenate([[historical_prices[-1]], most_likely]),
+                        name=f'Most Likely Path ({prob:.0%})',
+                        line=dict(color='red', width=3)
+                    ),
+                    row=1, col=1
                 )
         
-        # Update x-axis formats
-        fig.update_xaxes(
-            title_text="Date",
-            tickformat="%Y-%m-%d",
-            row=1, col=1
-        )
-        fig.update_xaxes(
-            title_text="Date",
-            tickformat="%Y-%m-%d",
-            row=2, col=1
-        )
-        
-        # Add return distribution comparison
-        # Get historical returns for comparison period
-        historical_returns = np.diff(np.log(historical_prices[-paths.shape[1]:]))
-        
-        # Get returns from ALL simulated paths
+        # 2. Return distribution comparison
+        historical_returns = np.diff(np.log(historical_prices))
         all_forecast_returns = np.diff(np.log(paths), axis=1).flatten()
-        
+
         # Plot return distributions
         fig.add_trace(
             go.Histogram(
@@ -909,7 +1285,7 @@ class FractalVisualizer:
             ),
             row=1, col=2
         )
-        
+
         fig.add_trace(
             go.Histogram(
                 x=all_forecast_returns,
@@ -921,19 +1297,19 @@ class FractalVisualizer:
             ),
             row=1, col=2
         )
-        
+
         # Calculate distribution statistics
         hist_mean = np.mean(historical_returns)
         hist_std = np.std(historical_returns)
         fore_mean = np.mean(all_forecast_returns)
         fore_std = np.std(all_forecast_returns)
-        
+
         # Add distribution statistics annotation
         stats_text = (
             f"Historical: μ={hist_mean:.3%}, σ={hist_std:.3%}<br>"
             f"Forecast: μ={fore_mean:.3%}, σ={fore_std:.3%}"
         )
-        
+
         fig.add_annotation(
             text=stats_text,
             xref="x2", yref="y2",
@@ -942,7 +1318,7 @@ class FractalVisualizer:
             showarrow=False,
             font=dict(size=10)
         )
-        
+
         # Update return distribution layout
         fig.update_xaxes(
             title_text="Returns",
@@ -952,31 +1328,41 @@ class FractalVisualizer:
             title_text="Probability",
             row=1, col=2
         )
-        
-        # Add explanatory annotation for return distribution
-        fig.add_annotation(
-            text=(
-                "Blue: Historical return distribution<br>"
-                "Red: Forecast return distribution<br>"
-                "Compare volatility and skewness"
-            ),
-            xref="x2", yref="y2",
-            x=min(min(historical_returns), min(all_forecast_returns)),
-            y=0.8,
-            showarrow=False,
-            font=dict(size=10)
-        )
-        
-        # 3. Statistics table
+
+        # 3. Add pattern matches if available
+        if 'pattern_matches' in path_analysis and len(path_analysis['pattern_matches']) > 0:
+            pattern_matches = path_analysis['pattern_matches']
+            for i, pattern in enumerate(pattern_matches[:5]):  # Show up to 5 patterns
+                match_start = pattern['historical_idx']
+                match_end = match_start + pattern['segment_length']
+                match_pattern = historical_prices[match_start:match_end]
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=dates[match_start:match_end],
+                        y=match_pattern,
+                        name=f'Pattern {i+1}',
+                        line=dict(dash='dot')
+                    ),
+                    row=2, col=1
+                )
+
+        # 4. Statistics table
+        prob = 0
+        if 'cluster_probs' in path_analysis and len(path_analysis['cluster_probs']) > 0:
+            prob = max(path_analysis['cluster_probs'])
+        elif 'path_probabilities' in path_analysis:
+            prob = max(path_analysis['path_probabilities'])
+
         stats_data = [
             ['Metric', 'Value', 'Interpretation'],
             ['Hurst Exponent', f"{analysis_results['hurst']:.3f}", '>0.5 suggests trend persistence'],
             ['Fractal Dimension', f"{analysis_results['fractal_dim']:.3f}", 'higher = more volatile'],
-            ['Pattern Matches', str(len(path_analysis['pattern_matches'])), 'matching forecast paths'],
-            ['Most Likely Probability', f"{prob:.1%}", 'based on patterns & clusters'],
+            ['Pattern Matches', str(len(path_analysis.get('pattern_matches', []))), 'matching forecast paths'],
+            ['Forecast Paths', f"{paths.shape[0]:,}", 'simulated trajectories'],
             ['Forecast Horizon', f"{paths.shape[1]} steps", 'prediction length']
         ]
-        
+
         fig.add_trace(
             go.Table(
                 header=dict(
@@ -992,7 +1378,7 @@ class FractalVisualizer:
             ),
             row=2, col=2
         )
-        
+
         # Update layout
         fig.update_layout(
             height=900,
@@ -1008,7 +1394,7 @@ class FractalVisualizer:
             title_text="Fractal Pattern Analysis and Forecast",
             title_x=0.5
         )
-        
+
         # Add explanatory annotations
         fig.add_annotation(
             text="Gray cloud shows possible paths<br>Red line shows most likely trajectory",
@@ -1017,7 +1403,7 @@ class FractalVisualizer:
             showarrow=False,
             font=dict(size=10)
         )
-        
+
         fig.add_annotation(
             text="Historical patterns matching<br>forecast trajectories",
             xref="paper", yref="paper",
@@ -1025,8 +1411,665 @@ class FractalVisualizer:
             showarrow=False,
             font=dict(size=10)
         )
+
+        return fig
+
+    def plot_quantum_analysis(self, prices, quantum_results, dates=None):
+        """Plot quantum analysis results."""
+        fig = make_subplots(
+            rows=3, cols=1, 
+            subplot_titles=[
+                "Price History", 
+                "Quantum Price Levels", 
+                "Multidimensional Fractal Analysis"
+            ],
+            vertical_spacing=0.1,
+            row_heights=[0.3, 0.3, 0.4]
+        )
+        
+        # Add price history
+        if dates is not None:
+            fig.add_trace(go.Scatter(x=dates, y=prices, name="Price"), row=1, col=1)
+        else:
+            fig.add_trace(go.Scatter(y=prices, name="Price"), row=1, col=1)
+        
+        # Add quantum price levels
+        qpl = quantum_results['price_levels']['levels']
+        for level in qpl:
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, len(prices)], 
+                    y=[level['price'], level['price']], 
+                    name=f"QPL: {level['price']:.2f}",
+                    line=dict(dash="dash", width=1, color=f"rgba(255, 0, 0, {level['probability']:.2f})")
+                ),
+                row=2, col=1
+            )
+        
+        # Add hurst exponent heatmap
+        multi_results = quantum_results['multi_dimensional']
+        fig.add_trace(
+            go.Heatmap(
+                z=multi_results['cross_correlations'],
+                x=['Price', 'Volume'],
+                y=['Price', 'Volume'],
+                colorscale='Viridis',
+                name="Cross-Correlations"
+            ),
+            row=3, col=1
+        )
+        
+        fig.update_layout(
+            height=800,
+            title_text="Quantum Fractal Analysis"
+        )
         
         return fig
+
+    def plot_high_density_forecast(
+        self,
+        historical_prices: np.ndarray,
+        simulation_results: Tuple[np.ndarray, Dict],
+        analysis_results: Dict,
+        dates: np.ndarray
+    ) -> go.Figure:
+        """Create high-performance density visualization showing sample paths with percentile coloring."""
+        paths, path_analysis = simulation_results
+        
+        # Create future dates for forecast
+        last_date = dates[-1]
+        forecast_dates = pd.date_range(
+            start=last_date, 
+            periods=paths.shape[1]+1,
+            freq='B'
+        )
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add historical prices
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=historical_prices,
+                name='Historical',
+                line=dict(color='blue', width=2)
+            )
+        )
+        
+        # Calculate percentiles at each time step
+        percentiles = [5, 25, 50, 75, 95]
+        percentile_paths = np.zeros((len(percentiles), paths.shape[1]))
+        
+        for t in range(paths.shape[1]):
+            percentile_paths[:, t] = np.percentile(paths[:, t], percentiles)
+        
+        # Define color scale
+        def get_color(percentile, opacity=0.15):
+            """Get color based on percentile (blue->green->red)."""
+            if percentile < 50:
+                # Blue (0,0,255) to Green (0,255,0)
+                ratio = percentile / 50
+                r = 0
+                g = int(255 * ratio)
+                b = int(255 * (1 - ratio))
+            else:
+                # Green (0,255,0) to Red (255,0,0)
+                ratio = (percentile - 50) / 50
+                r = int(255 * ratio)
+                g = int(255 * (1 - ratio))
+                b = 0
+            return f'rgba({r},{g},{b},{opacity})'
+        
+        # Add sample paths - limit to 100 for performance
+        max_samples = min(100, paths.shape[0])
+        sample_indices = np.linspace(0, paths.shape[0]-1, max_samples, dtype=int)
+        
+        # Calculate final values for each path to determine percentiles
+        final_values = paths[sample_indices, -1]
+        ranks = np.argsort(np.argsort(final_values)) / len(final_values) * 100
+        
+        # Plot sampled paths
+        for i, idx in enumerate(sample_indices):
+            percentile = ranks[i]
+            color = get_color(percentile)
+            path = paths[idx]
+            
+            # No legend entries for individual paths
+            fig.add_trace(
+                go.Scatter(  # Use regular Scatter instead of Scattergl for compatibility
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], path]),
+                    name=f'Path {i+1}',
+                    line=dict(color=color, width=1),
+                    showlegend=False,
+                    hoverinfo='none'  # Disable hover for performance
+                )
+            )
+        
+        # Add shaded areas for percentile bands
+        # 5-95 percentile band
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_dates,
+                y=np.concatenate([[historical_prices[-1]], percentile_paths[4]]),  # 95th
+                name='95th percentile',
+                line=dict(color='rgba(255,0,0,0.5)', width=1.5, dash='dot'),
+                showlegend=True
+            )
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_dates,
+                y=np.concatenate([[historical_prices[-1]], percentile_paths[0]]),  # 5th
+                name='5th percentile',
+                fill='tonexty',
+                fillcolor='rgba(150,150,150,0.2)',  # Light gray
+                line=dict(color='rgba(0,0,255,0.5)', width=1.5, dash='dot'),
+                showlegend=True
+            )
+        )
+        
+        # 25-75 percentile band (interquartile range)
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_dates,
+                y=np.concatenate([[historical_prices[-1]], percentile_paths[3]]),  # 75th
+                name='75th percentile',
+                line=dict(color='rgba(255,0,0,0.8)', width=1.5),
+                showlegend=True
+            )
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_dates,
+                y=np.concatenate([[historical_prices[-1]], percentile_paths[1]]),  # 25th
+                name='25th percentile',
+                fill='tonexty',
+                fillcolor='rgba(150,150,150,0.4)',  # Darker gray
+                line=dict(color='rgba(0,0,255,0.8)', width=1.5),
+                showlegend=True
+            )
+        )
+        
+        # Median path
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_dates,
+                y=np.concatenate([[historical_prices[-1]], percentile_paths[2]]),  # 50th
+                name='Median forecast',
+                line=dict(color='purple', width=2),
+                showlegend=True
+            )
+        )
+        
+        # Add most likely path if available
+        if 'most_likely_path' in path_analysis:
+            most_likely = path_analysis['most_likely_path']
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=forecast_dates,
+                    y=np.concatenate([[historical_prices[-1]], most_likely]),
+                    name='Most likely path',
+                    line=dict(color='black', width=2.5),
+                    showlegend=True
+                )
+            )
+        
+        # Configure layout
+        fig.update_layout(
+            title="High Density Path Visualization",
+            xaxis_title="Date",
+            yaxis_title="Price",
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        return fig
+
+def run_backtest(
+    symbols: list, 
+    sample_count: int, 
+    start_date: str,
+    end_date: str,
+    forecast_horizon: int,
+    metrics: list,
+    benchmarks: list,
+    progress_callback=None,
+    status_callback=None,
+    cancellation_callback=None,
+    parallel=True,
+    max_workers=4,
+    shared_cancellation_flag=None
+) -> dict:
+    """Run a comprehensive backtest of the fractal forecasting model with parallel processing."""
+    symbol_results = {}
+    all_samples = []
+    
+    # Use a shared flag if provided, otherwise create a new one
+    cancellation_flag = shared_cancellation_flag if shared_cancellation_flag is not None else [False]
+    
+    # Keep track of total samples processed
+    total_samples = 0
+    
+    if parallel:
+        message = f"Starting backtest with {len(symbols)} symbols, {sample_count} samples each"
+        print(message)
+        if status_callback:
+            try:
+                status_callback(message)
+            except:
+                print("Status callback failed - likely a session state issue")
+            
+        message = f"Running in parallel mode with up to {max_workers} workers"
+        print(message)
+        if status_callback:
+            try:
+                status_callback(message)
+            except:
+                print("Status callback failed - likely a session state issue")
+        
+        # Create a wrapper for each symbol that includes the required parameters
+        def process_with_params(symbol):
+            return process_symbol(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                forecast_horizon=forecast_horizon,
+                sample_count=sample_count,
+                metrics=metrics,
+                benchmarks=benchmarks,
+                status_callback=None,  # Don't pass the status_callback to the worker
+                progress_callback=None,  # Don't pass the progress_callback to the worker
+                cancellation_flag=cancellation_flag
+            )
+            
+        # Process symbols in parallel with ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(symbols))) as executor:
+            # Start all workers
+            future_results = {executor.submit(process_with_params, symbol): symbol for symbol in symbols}
+            
+            # Process results as they complete
+            for future in as_completed(future_results):
+                try:
+                    symbol = future_results[future]
+                    result = future.result()
+                    
+                    # Check for cancellation
+                    if cancellation_flag[0]:
+                        break
+                    
+                    # Store valid results
+                    if result is not None and 'samples' in result and len(result['samples']) > 0:
+                        symbol_results[symbol] = result
+                        all_samples.extend(result['samples'])
+                        total_samples += len(result['samples'])
+                        print(f"Added {len(result['samples'])} samples from {symbol}")
+                        
+                except Exception as e:
+                    print(f"Error processing {future_results[future]}: {e}")
+                    import traceback
+                    traceback.print_exc()
+    else:
+        # Sequential processing
+        for symbol in symbols:
+            if cancellation_callback and cancellation_callback():
+                break
+                
+            try:
+                result = process_symbol(
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    forecast_horizon=forecast_horizon,
+                    sample_count=sample_count,
+                    metrics=metrics,
+                    benchmarks=benchmarks,
+                    status_callback=status_callback,
+                    progress_callback=progress_callback,
+                    cancellation_flag=None  # No shared flag needed for sequential
+                )
+                
+                if result is not None and 'samples' in result and len(result['samples']) > 0:
+                    symbol_results[symbol] = result
+                    all_samples.extend(result['samples'])
+                    total_samples += len(result['samples'])
+            except Exception as e:
+                print(f"Error processing {symbol}: {e}")
+                if status_callback:
+                    try:
+                        status_callback(f"Error processing {symbol}: {e}")
+                    except:
+                        print("Status callback failed - likely a session state issue")
+    
+    # Process the final results
+    message = f"Backtest complete with {total_samples} total samples across {len(symbol_results)} symbols"
+    print(message)
+    
+    if status_callback:
+        try:
+            status_callback(message)
+        except:
+            print("Status callback failed - likely session state issue")
+    
+    # Calculate aggregate metrics if we have samples
+    if len(all_samples) > 0:
+        aggregate_metrics = aggregate_sample_metrics(all_samples, metrics, benchmarks)
+    else:
+        aggregate_metrics = {}
+    
+    # Return the results
+    return {
+        'aggregate_metrics': aggregate_metrics,
+        'symbol_results': symbol_results
+    }
+
+def backtest_symbol(
+    symbol: str, 
+    prices: np.ndarray, 
+    dates: np.ndarray, 
+    sample_count: int, 
+    forecast_horizon: int,
+    metrics: list,
+    benchmarks: list,
+    cancellation_callback=None
+) -> dict:
+    """Run backtest for a single symbol."""
+    samples = []
+    
+    print(f"Starting backtest for {symbol} with {sample_count} samples")
+    
+    # Determine valid range for test windows
+    min_test_start = 252  # Require at least 1 year of data
+    max_test_start = len(prices) - forecast_horizon
+    
+    if max_test_start <= min_test_start:
+        print(f"Not enough data for {symbol}, need at least {min_test_start + forecast_horizon} points")
+        return {'samples': [], 'aggregated_metrics': {}}
+    
+    for i in range(sample_count):
+        # Check for cancellation
+        if cancellation_callback and cancellation_callback():
+            print(f"Backtest cancelled after {len(samples)} samples")
+            break
+            
+        try:
+            # Randomly select a test start point
+            test_start = np.random.randint(min_test_start, max_test_start)
+            
+            # Split data into train/test
+            train_prices = prices[:test_start]  # Changed from idx to test_start
+            train_dates = dates[:test_start]    # Changed from idx to test_start
+            test_prices = prices[test_start:test_start+forecast_horizon]
+            test_dates = dates[test_start:test_start+forecast_horizon]
+            
+            if len(test_prices) < forecast_horizon:
+                continue  # Skip if not enough test data
+            
+            # Initialize analyzer and simulator
+            analyzer = FractalAnalyzer()
+            simulator = FractalSimulator(train_prices, analyzer)
+            
+            # Generate forecast paths and calculate representative path
+            paths, path_analysis = simulator.simulate_paths_fast(n_steps=forecast_horizon, n_paths=100)
+            forecast_path = path_analysis['most_likely_path']
+            
+            # Verify forecast path shape
+            print(f"Sample {i}: Forecast path shape {forecast_path.shape}, Test prices shape {test_prices.shape}")
+            
+            # Generate benchmark forecasts
+            benchmark_forecasts = {}
+            
+            if 'Random Walk' in benchmarks:
+                # Last price + random normal noise based on historical volatility
+                hist_returns = np.diff(np.log(train_prices[-30:]))  # Use last 30 days for volatility
+                daily_vol = np.std(hist_returns)
+                
+                rw_returns = np.random.normal(0, daily_vol, size=forecast_horizon)
+                rw_forecast = train_prices[-1] * np.exp(np.cumsum(rw_returns))
+                benchmark_forecasts['Random Walk'] = rw_forecast
+            
+            if 'Simple Moving Average' in benchmarks:
+                # 5-day SMA continuation
+                window = 5
+                sma = np.mean(train_prices[-window:])
+                sma_forecast = np.ones(forecast_horizon) * sma
+                benchmark_forecasts['Simple Moving Average'] = sma_forecast
+                
+            if 'ARIMA' in benchmarks or 'SARIMA' in benchmarks:
+                try:
+                    from statsmodels.tsa.statespace.sarimax import SARIMAX
+                    from pmdarima import auto_arima  # We'll need to add this to requirements.txt
+                    
+                    # Let auto_arima find the best parameters
+                    train_series = pd.Series(train_prices[-max(60, forecast_horizon*3):])
+                    
+                    # For shorter samples, use simpler models
+                    if len(train_series) < 100:
+                        model = auto_arima(train_series, start_p=0, start_q=0,
+                                   max_p=2, max_q=2, m=5,
+                                   seasonal=True, d=1, D=1, trace=False,
+                                   error_action='ignore',  
+                                   suppress_warnings=True, 
+                                   stepwise=True)
+                    else:
+                        model = auto_arima(train_series, seasonal=True, m=5,
+                                   error_action='ignore',  
+                                   suppress_warnings=True)
+                                   
+                    # Generate forecast
+                    arima_forecast = model.predict(n_periods=forecast_horizon)
+                    benchmark_forecasts['ARIMA'] = arima_forecast
+                except Exception as e:
+                    print(f"Error with ARIMA benchmark: {e}")
+                    # Fallback to simpler model if auto_arima fails
+                    benchmark_forecasts['ARIMA'] = np.ones(forecast_horizon) * train_prices[-1]
+            
+            # Calculate performance metrics for fractal model
+            fractal_metrics = calculate_forecast_metrics(test_prices, forecast_path, metrics)
+            print(f"Sample {i}: Calculated metrics: {fractal_metrics}")
+            
+            sample_results = {
+                'symbol': symbol,
+                'start_date': train_dates[-1],
+                'end_date': test_dates[-1],
+                'train_prices': train_prices,
+                'test_prices': test_prices,
+                'forecast_path': forecast_path,
+                'benchmark_forecasts': benchmark_forecasts,
+                'metrics': fractal_metrics,
+                'benchmark_metrics': {}
+            }
+            
+            # Calculate benchmark metrics
+            for name, forecast in benchmark_forecasts.items():
+                bench_metrics = calculate_forecast_metrics(test_prices, forecast, metrics)
+                sample_results['benchmark_metrics'][name] = bench_metrics
+                print(f"Sample {i}: {name} metrics: {bench_metrics}")
+                
+            samples.append(sample_results)
+        except Exception as e:
+            print(f"Error processing sample {i} for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    print(f"Completed {len(samples)} valid samples for {symbol}")
+    
+    # Aggregate metrics across all samples for this symbol
+    symbol_metrics = aggregate_sample_metrics(samples, metrics, benchmarks)
+    
+    return {
+        'samples': samples,
+        'aggregated_metrics': symbol_metrics
+    }
+
+def calculate_forecast_metrics(actual: np.ndarray, forecast: np.ndarray, metrics: list) -> dict:
+    """Calculate performance metrics for a forecast."""
+    results = {}
+    
+    # Ensure arrays are the same length
+    min_len = min(len(actual), len(forecast))
+    actual = actual[:min_len]
+    forecast = forecast[:min_len]
+    
+    if 'MAPE' in metrics:
+        # Mean Absolute Percentage Error
+        mape = np.mean(np.abs((actual - forecast) / actual)) * 100
+        results['MAPE'] = mape
+    
+    if 'RMSE' in metrics:
+        # Root Mean Squared Error
+        rmse = np.sqrt(np.mean((actual - forecast) ** 2))
+        results['RMSE'] = rmse
+    
+    if 'Direction Accuracy' in metrics:
+        # Direction prediction accuracy
+        actual_dirs = np.sign(np.diff(actual))
+        forecast_dirs = np.sign(np.diff(forecast))
+        
+        # Count correct direction predictions
+        correct_dirs = np.sum(actual_dirs == forecast_dirs)
+        total_dirs = len(actual_dirs)
+        
+        direction_accuracy = correct_dirs / total_dirs * 100 if total_dirs > 0 else 0
+        results['Direction Accuracy'] = direction_accuracy
+    
+    return results
+
+def aggregate_sample_metrics(samples: list, metrics: list, benchmarks: list) -> dict:
+    """Aggregate metrics across all samples for a symbol."""
+    # Initialize with proper structure even if no samples
+    aggregated = {
+        'fractal_model': {
+            metric: {'mean': 0, 'median': 0, 'std': 0, 'win_rate': 0} 
+            for metric in metrics
+        },
+        'benchmarks': {
+            benchmark: {
+                metric: {'mean': 0, 'median': 0, 'std': 0} 
+                for metric in metrics
+            } 
+            for benchmark in benchmarks
+        }
+    }
+    
+    # If no samples, return the initialized structure
+    if not samples:
+        return aggregated
+    
+    # Reset values to be calculated from samples
+    for metric in metrics:
+        aggregated['fractal_model'][metric] = {
+            'mean': 0, 'median': 0, 'std': 0, 'win_rate': 0
+        }
+        
+    # Collect all metrics
+    for metric in metrics:
+        fractal_values = [s['metrics'].get(metric, np.nan) for s in samples]
+        aggregated['fractal_model'][metric] = {
+            'mean': np.nanmean(fractal_values),
+            'median': np.nanmedian(fractal_values),
+            'std': np.nanstd(fractal_values),
+            'win_rate': 0  # Will calculate after getting benchmark metrics
+        }
+        
+        # Collect benchmark metrics
+        for benchmark in benchmarks:
+            bench_values = [s['benchmark_metrics'].get(benchmark, {}).get(metric, np.nan) 
+                           for s in samples]
+            
+            aggregated['benchmarks'][benchmark][metric] = {
+                'mean': np.nanmean(bench_values),
+                'median': np.nanmedian(bench_values),
+                'std': np.nanstd(bench_values)
+            }
+            
+            # Calculate win rate against benchmark
+            if metric in ['MAPE', 'RMSE']:  # Lower is better
+                wins = sum(fv < bv for fv, bv in zip(fractal_values, bench_values) 
+                          if not np.isnan(fv) and not np.isnan(bv))
+            else:  # Higher is better
+                wins = sum(fv > bv for fv, bv in zip(fractal_values, bench_values)
+                          if not np.isnan(fv) and not np.isnan(bv))
+                
+            total = sum(1 for fv, bv in zip(fractal_values, bench_values)
+                       if not np.isnan(fv) and not np.isnan(bv))
+            
+            if total > 0:
+                aggregated['fractal_model'][metric]['win_rate'] = wins / total * 100
+            
+    return aggregated
+
+def aggregate_backtest_results(symbol_results: dict, metrics: list, benchmarks: list) -> dict:
+    """Aggregate results across all symbols."""
+    all_samples = []
+    
+    for symbol, results in symbol_results.items():
+        all_samples.extend(results['samples'])
+    
+    return aggregate_sample_metrics(all_samples, metrics, benchmarks)
+
+def process_symbol(
+    symbol,
+    start_date,
+    end_date,
+    forecast_horizon,
+    sample_count,
+    metrics,
+    benchmarks,
+    status_callback=None,
+    progress_callback=None,
+    cancellation_flag=None
+):
+    """Worker function for parallel processing that doesn't access st.session_state."""
+    try:
+        # Set default cancellation flag if none provided
+        if cancellation_flag is None:
+            cancellation_flag = [False]
+            
+        # Get full historical data
+        full_data = get_yahoo_data(symbol, start_date, end_date)
+        prices = full_data['Close'].to_numpy()
+        dates = full_data['Date'].to_numpy()
+        
+        if len(prices) < forecast_horizon * 2:
+            print(f"Not enough data for {symbol}, skipping")
+            if status_callback:
+                status_callback(f"Not enough data for {symbol}, skipping")
+            return None
+        
+        # Define a local cancellation callback that uses the shared flag
+        def local_cancellation_check():
+            return cancellation_flag[0] if cancellation_flag else False
+            
+        # Process the symbol
+        symbol_results = backtest_symbol(
+            symbol, prices, dates, sample_count, forecast_horizon, metrics, benchmarks,
+            cancellation_callback=local_cancellation_check
+        )
+        
+        # Update progress if callback provided
+        if progress_callback:
+            progress_callback(symbol, len(symbol_results['samples']))
+            
+        return symbol_results
+        
+    except Exception as e:
+        print(f"Error backtesting {symbol}: {e}")
+        if status_callback:
+            status_callback(f"Error backtesting {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 # Example usage
 if __name__ == "__main__":
@@ -1043,7 +2086,7 @@ if __name__ == "__main__":
     
     # Run analysis and simulation
     analysis_results = analyzer.analyze_patterns(prices)
-    paths, path_analysis = simulator.simulate_paths(n_steps=30, n_paths=1000)
+    paths, path_analysis = simulator.simulate_paths_fast(n_steps=30, n_paths=100)
     path_analysis = path_analyzer.analyze_paths(paths)
     
     # Visualize results
