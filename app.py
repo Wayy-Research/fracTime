@@ -11,6 +11,14 @@ import polars as pl
 import streamlit as st
 import yfinance as yf
 
+# Set page configuration
+st.set_page_config(
+    page_title="fractime",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Local application/library imports
 from fractime import (
     FractalAnalyzer,
