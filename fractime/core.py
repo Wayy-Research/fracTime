@@ -141,6 +141,429 @@ def compute_box_dimension_safe(scaled_prices: np.ndarray, min_window: int, max_w
     else:
         return 1.5  # Default value
 
+class CrossDimensionalAnalyzer:
+    """
+    Analyzes fractal correlations across multiple dimensions (e.g., price and volume).
+    
+    This class implements the concept that different market dimensions (price, volume,
+    volatility) exhibit fractal correlations that can provide deeper insights into
+    market regimes and transitions.
+    """
+    
+    def __init__(self):
+        """Initialize cross-dimensional analyzer."""
+        self.dimensions = {}
+        self.correlation_matrix = None
+        self.fractal_coherence = None
+        self.regime_states = None
+    
+    def add_dimension(self, name: str, data: np.ndarray) -> None:
+        """
+        Add a market dimension for cross-analysis.
+        
+        Args:
+            name: Dimension name (e.g., "price", "volume")
+            data: Time series data for this dimension
+        """
+        self.dimensions[name] = data
+        self._invalidate_cache()
+    
+    def _invalidate_cache(self) -> None:
+        """Reset cached computations when dimensions change."""
+        self.correlation_matrix = None
+        self.fractal_coherence = None
+        self.regime_states = None
+    
+    def compute_fractal_dimensions(self) -> Dict[str, float]:
+        """Compute fractal dimension for each data dimension."""
+        fractal_dims = {}
+        analyzer = FractalAnalyzer()
+        
+        for name, data in self.dimensions.items():
+            # Calculate fractal dimension using existing analyzer
+            fractal_dims[name] = analyzer.compute_fractal_dimension(data)
+        
+        return fractal_dims
+    
+    def compute_hurst_exponents(self) -> Dict[str, float]:
+        """Compute Hurst exponent for each data dimension."""
+        hurst_exponents = {}
+        analyzer = FractalAnalyzer()
+        
+        for name, data in self.dimensions.items():
+            # Calculate Hurst exponent using existing analyzer
+            hurst_exponents[name] = analyzer.compute_hurst(data)
+        
+        return hurst_exponents
+    
+    def compute_cross_correlation(self, window_size: int = 20) -> np.ndarray:
+        """
+        Compute cross-correlation matrix between dimensions at different scales.
+        
+        Args:
+            window_size: Size of rolling window for local correlation analysis
+            
+        Returns:
+            Correlation matrix (dimensions × dimensions)
+        """
+        # Get dimension names in consistent order
+        dim_names = list(self.dimensions.keys())
+        n_dims = len(dim_names)
+        
+        if n_dims < 2:
+            raise ValueError("Need at least 2 dimensions for cross-correlation analysis")
+            
+        # Pre-compute returns/changes for each dimension
+        changes = {}
+        for name in dim_names:
+            # Get log returns for price-like series, or percentage changes for others
+            data = self.dimensions[name]
+            changes[name] = np.diff(np.log(data)) if np.min(data) > 0 else np.diff(data) / data[:-1]
+            
+        # Find the smallest valid length across all dimensions
+        min_length = min(len(changes[name]) for name in dim_names)
+        
+        # Compute rolling correlation matrix
+        n_windows = min_length - window_size + 1
+        if n_windows <= 0:
+            raise ValueError(f"Window size {window_size} is too large for data length {min_length}")
+            
+        # Initialize correlation matrices at different scales
+        # We'll consider 3 scales: short-term, medium-term, and long-term
+        scales = [window_size, window_size*2, window_size*4]
+        scale_weights = [0.5, 0.3, 0.2]  # Weighting for different scales
+        
+        cross_corr_by_scale = {}
+        
+        for scale in scales:
+            if min_length <= scale:
+                continue  # Skip scales that are too large
+                
+            # Calculate correlation for this scale
+            corr_matrix = np.zeros((n_dims, n_dims))
+            
+            for i, name1 in enumerate(dim_names):
+                change1 = changes[name1][:min_length]
+                
+                for j, name2 in enumerate(dim_names):
+                    if i == j:
+                        corr_matrix[i, j] = 1.0  # Self-correlation
+                        continue
+                        
+                    change2 = changes[name2][:min_length]
+                    
+                    try:
+                        # Calculate correlation with safety checks
+                        if np.std(change1) > 0 and np.std(change2) > 0:
+                            corr = np.corrcoef(change1, change2)[0, 1]
+                            if not np.isnan(corr):
+                                corr_matrix[i, j] = corr
+                    except Exception:
+                        pass  # Keep default 0 correlation on error
+                        
+            cross_corr_by_scale[scale] = corr_matrix
+        
+        # Combine scales with weights
+        if not cross_corr_by_scale:
+            # If no valid scales, return identity matrix
+            self.correlation_matrix = np.eye(n_dims)
+            return self.correlation_matrix
+            
+        # Combine with weights
+        combined_matrix = np.zeros((n_dims, n_dims))
+        total_weight = 0
+        
+        for idx, scale in enumerate(scales):
+            if scale in cross_corr_by_scale:
+                weight = scale_weights[idx]
+                combined_matrix += weight * cross_corr_by_scale[scale]
+                total_weight += weight
+                
+        if total_weight > 0:
+            combined_matrix /= total_weight
+            
+        # Ensure diagonal is 1
+        np.fill_diagonal(combined_matrix, 1.0)
+        
+        self.correlation_matrix = combined_matrix
+        return combined_matrix
+    
+    def compute_fractal_coherence(self, window_sizes=[5, 21, 63]) -> Dict:
+        """
+        Compute fractal coherence between dimensions.
+        
+        Fractal coherence measures how consistent the fractal properties
+        are between different dimensions over time. Higher coherence
+        suggests stronger cross-dimensional coupling.
+        
+        Args:
+            window_sizes: List of window sizes for multi-scale analysis
+            
+        Returns:
+            Dictionary of coherence metrics
+        """
+        dim_names = list(self.dimensions.keys())
+        n_dims = len(dim_names)
+        
+        if n_dims < 2:
+            return {'coherence': 0}
+            
+        # Compute local Hurst exponents and fractal dimensions at different scales
+        local_hurst = {}
+        local_fractal_dim = {}
+        
+        for name in dim_names:
+            data = self.dimensions[name]
+            local_hurst[name] = {}
+            local_fractal_dim[name] = {}
+            
+            for window in window_sizes:
+                if len(data) <= window:
+                    continue
+                    
+                # Calculate rolling Hurst exponent
+                h_values = []
+                fd_values = []
+                analyzer = FractalAnalyzer()
+                
+                for i in range(window, len(data), window//2):  # Use overlapping windows
+                    segment = data[i-window:i]
+                    h_values.append(analyzer.compute_hurst(segment))
+                    fd_values.append(analyzer.compute_fractal_dimension(segment, quick_mode=True))
+                
+                local_hurst[name][window] = np.array(h_values)
+                local_fractal_dim[name][window] = np.array(fd_values)
+        
+        # Calculate coherence at each scale
+        coherence_by_scale = {}
+        
+        for window in window_sizes:
+            # Check if we have data for this window
+            valid_dims = [name for name in dim_names 
+                         if window in local_hurst[name] and len(local_hurst[name][window]) > 0]
+            
+            if len(valid_dims) < 2:
+                continue
+                
+            # Calculate pairwise correlations in fractal metrics
+            h_corr = np.zeros((len(valid_dims), len(valid_dims)))
+            fd_corr = np.zeros((len(valid_dims), len(valid_dims)))
+            
+            for i, name1 in enumerate(valid_dims):
+                for j, name2 in enumerate(valid_dims):
+                    if i >= j:  # Only calculate upper triangle
+                        continue
+                        
+                    h1 = local_hurst[name1][window]
+                    h2 = local_hurst[name2][window]
+                    
+                    fd1 = local_fractal_dim[name1][window]
+                    fd2 = local_fractal_dim[name2][window]
+                    
+                    # Ensure same length
+                    min_len = min(len(h1), len(h2))
+                    if min_len > 1:
+                        h1, h2 = h1[:min_len], h2[:min_len]
+                        try:
+                            h_corr[i, j] = abs(np.corrcoef(h1, h2)[0, 1])
+                        except:
+                            h_corr[i, j] = 0
+                            
+                    min_len = min(len(fd1), len(fd2))
+                    if min_len > 1:
+                        fd1, fd2 = fd1[:min_len], fd2[:min_len]
+                        try:
+                            fd_corr[i, j] = abs(np.corrcoef(fd1, fd2)[0, 1])
+                        except:
+                            fd_corr[i, j] = 0
+            
+            # Make symmetric
+            h_corr = h_corr + h_corr.T
+            fd_corr = fd_corr + fd_corr.T
+            np.fill_diagonal(h_corr, 1.0)
+            np.fill_diagonal(fd_corr, 1.0)
+            
+            # Combine Hurst and fractal dimension coherence
+            coherence = 0.5 * h_corr + 0.5 * fd_corr
+            coherence_by_scale[window] = coherence
+            
+        # Calculate average coherence across scales
+        if not coherence_by_scale:
+            return {'coherence': 0}
+            
+        # Combine coherence across scales with weights favoring smaller scales
+        weights = {window: 1.0/window for window in coherence_by_scale}
+        total_weight = sum(weights.values())
+        
+        # Normalize weights
+        if total_weight > 0:
+            weights = {k: v/total_weight for k, v in weights.items()}
+        
+        # Weighted average of coherence matrices
+        avg_coherence = sum(weights[w] * coherence_by_scale[w] for w in coherence_by_scale)
+        
+        # Calculate overall coherence as average of off-diagonal elements
+        off_diag_mask = ~np.eye(avg_coherence.shape[0], dtype=bool)
+        overall_coherence = np.mean(avg_coherence[off_diag_mask])
+        
+        self.fractal_coherence = {
+            'by_scale': coherence_by_scale,
+            'average': avg_coherence,
+            'overall': overall_coherence
+        }
+        
+        return self.fractal_coherence
+    
+    def identify_regimes(self, n_regimes: int = 3) -> Dict:
+        """
+        Identify market regimes based on cross-dimensional fractal properties.
+        
+        Args:
+            n_regimes: Number of regime states to identify
+            
+        Returns:
+            Dictionary with regime information
+        """
+        # Ensure we have computed necessary metrics
+        if self.correlation_matrix is None:
+            self.compute_cross_correlation()
+            
+        if self.fractal_coherence is None:
+            self.compute_fractal_coherence()
+            
+        dim_names = list(self.dimensions.keys())
+        n_dims = len(dim_names)
+        
+        # Extract features for regime identification
+        features = []
+        
+        # Ensure at least one dimension (typically price) has fractal metrics
+        for name in dim_names:
+            data = self.dimensions[name]
+            analyzer = FractalAnalyzer()
+            
+            # Calculate in smaller windows to capture regime changes
+            window_size = min(63, len(data) // 5)
+            window_size = max(window_size, 20)  # Ensure at least 20 points
+            
+            # Calculate rolling window metrics
+            hurst_values = []
+            fractal_dim_values = []
+            
+            for i in range(window_size, len(data), window_size // 2):
+                segment = data[i-window_size:i]
+                hurst_values.append(analyzer.compute_hurst(segment))
+                fractal_dim_values.append(analyzer.compute_fractal_dimension(segment, quick_mode=True))
+                
+            if not hurst_values:  # No valid windows
+                continue
+                
+            # Use metrics from most recent window
+            features.append(hurst_values[-1])
+            features.append(fractal_dim_values[-1])
+            
+        # Add cross-correlation information
+        if n_dims > 1:
+            # Flatten upper triangle of correlation matrix
+            corr_features = []
+            for i in range(n_dims):
+                for j in range(i+1, n_dims):
+                    corr_features.append(self.correlation_matrix[i, j])
+            features.extend(corr_features)
+            
+        # Add coherence if available
+        if isinstance(self.fractal_coherence, dict) and 'overall' in self.fractal_coherence:
+            features.append(self.fractal_coherence['overall'])
+            
+        # Ensure we have features
+        if not features:
+            return {
+                'regime': 0,
+                'n_regimes': 1,
+                'confidence': 1.0
+            }
+            
+        # Normalize features
+        features = np.array(features).reshape(1, -1)
+        
+        # Determine current regime based on these features
+        # We need historical data for this, but as an approximation,
+        # we can categorize the current state
+        
+        # Use simple thresholds for now
+        # In a more complete implementation, we would use clustering or HMM
+        # on historical feature vectors
+        
+        # For now, let's use a simple rule-based approach
+        if len(features[0]) >= 2:  # At least Hurst and fractal dimension 
+            hurst = features[0][0]
+            fractal_dim = features[0][1]
+            
+            if hurst > 0.6:  # Strong trend persistence
+                regime = 0  # Trending regime
+                confidence = min(1.0, (hurst - 0.6) * 5)  # Scale confidence
+            elif hurst < 0.4:  # Mean reversion
+                regime = 1  # Mean-reverting regime
+                confidence = min(1.0, (0.4 - hurst) * 5)
+            else:  # Random walk-like
+                regime = 2  # Random walk regime
+                mid_point = 0.5
+                confidence = 1.0 - abs(hurst - mid_point) * 5
+                
+            # Adjust confidence based on fractal dimension
+            # Higher fractal dimension typically indicates higher volatility
+            volatility_factor = min(1.0, max(0.0, (fractal_dim - 1.0) / 0.5))
+            
+            # Crosscheck with coherence if available
+            if len(features[0]) > 2 and features[0][2] > 0.7:
+                # High coherence strengthens confidence
+                confidence *= 1.2
+                confidence = min(1.0, confidence)
+        else:
+            # Not enough features
+            regime = 0
+            confidence = 0.5
+            
+        self.regime_states = {
+            'regime': regime,
+            'n_regimes': n_regimes,
+            'confidence': confidence,
+            'features': features[0].tolist(),
+            'feature_names': ['hurst', 'fractal_dim'] + 
+                            [f'corr_{i}_{j}' for i in range(n_dims) for j in range(i+1, n_dims)] +
+                            (['coherence'] if self.fractal_coherence else [])
+        }
+        
+        return self.regime_states
+    
+    def analyze_dimensions(self) -> Dict:
+        """
+        Run complete cross-dimensional fractal analysis.
+        
+        Returns:
+            Comprehensive analysis results
+        """
+        results = {
+            'dimensions': list(self.dimensions.keys()),
+            'fractal_dimensions': self.compute_fractal_dimensions(),
+            'hurst_exponents': self.compute_hurst_exponents(),
+            'cross_correlation': self.compute_cross_correlation().tolist(),
+        }
+        
+        # Add fractal coherence if we have multiple dimensions
+        if len(self.dimensions) > 1:
+            coherence = self.compute_fractal_coherence()
+            results['fractal_coherence'] = {
+                'overall': coherence['overall']
+            }
+            
+            # Add regime identification
+            regime_info = self.identify_regimes()
+            results['regime'] = regime_info
+            
+        return results
+
+
 class FractalAnalyzer:
     """Analyzes fractal properties of time series data."""
     
@@ -366,21 +789,54 @@ class FractalAnalyzer:
 class FractalSimulator:
     """Generates paths based on fractal patterns and historical distributions."""
     
-    def __init__(self, prices: np.ndarray, analyzer: FractalAnalyzer):
+    def __init__(self, prices: np.ndarray, analyzer: FractalAnalyzer, volumes: np.ndarray = None):
         self.prices = prices
         self.analyzer = analyzer
         self.patterns = None
         self.hurst = None
+        self.volumes = volumes
+        self.time_warper = TradingTimeWarper()
+        self.cross_dim_analyzer = None
+        self.quantum_generator = None
+        self.quantum_levels = None
         self._analyze()
+        
+        # Set up trading time warping if we have volumes
+        if self.volumes is not None and len(self.volumes) == len(self.prices):
+            self.time_map = self.time_warper.compute_time_transformation(self.prices, self.volumes)
+            print("Trading time mapping computed with price and volume data")
+            
+            # Initialize cross-dimensional analyzer if we have volumes
+            self.cross_dim_analyzer = CrossDimensionalAnalyzer()
+            self.cross_dim_analyzer.add_dimension("price", self.prices)
+            self.cross_dim_analyzer.add_dimension("volume", self.volumes)
+            
+            # Perform initial cross-dimensional analysis
+            self.cross_dim_results = self.cross_dim_analyzer.analyze_dimensions()
+            print("Cross-dimensional fractal analysis completed")
+        else:
+            # Just use prices for time warping if no volumes
+            self.time_map = self.time_warper.compute_time_transformation(self.prices)
+            print("Trading time mapping computed with price data only")
+        
+        # Initialize quantum price level generator
+        from fractime.quantum import QuantumPriceLevelGenerator
+        self.quantum_generator = QuantumPriceLevelGenerator(energy_levels=5)
+        self.quantum_levels = self.quantum_generator.generate_price_levels(self.prices)
+        print("Quantum price levels generated")
         
         # Prepare sampled data for faster simulations
         if len(self.prices) > 1000:
             # Create downsampled version for faster regime matching
             sampling_rate = len(self.prices) // 1000
             self.sampled_prices = self.prices[::sampling_rate]
+            if self.volumes is not None:
+                self.sampled_volumes = self.volumes[::sampling_rate]
             print(f"Created downsampled data: {len(self.sampled_prices)} points")
         else:
             self.sampled_prices = self.prices
+            if self.volumes is not None:
+                self.sampled_volumes = self.volumes
     
     def _analyze(self):
         """Perform initial analysis."""
@@ -494,9 +950,15 @@ class FractalSimulator:
         n_paths: int = 1000,
         pattern_weight: float = 0.3,
         cloud_paths: int = 200,
-        preserve_volatility: bool = True
+        preserve_volatility: bool = True,
+        use_trading_time: bool = True,  # Parameter for trading time warping
+        warping_alpha: float = 0.5,     # Parameter for warping intensity
+        enable_time_forecast: bool = True,  # Whether to forecast time dilation into the future
+        use_cross_dim: bool = True,  # Parameter for cross-dimensional filtering
+        use_quantum_levels: bool = True,  # Parameter for quantum price level filtering
+        quantum_influence: float = 0.5  # How strongly quantum levels influence path selection (0-1)
     ) -> Tuple[np.ndarray, Dict]:
-        """Generate paths using regime-matched sampling based on recent volatility."""
+        """Generate paths using regime-matched sampling based on trading time transformation."""
         # Get historical returns
         historical_returns = np.diff(np.log(self.prices))
         
@@ -507,55 +969,147 @@ class FractalSimulator:
         recent_returns = historical_returns[-lookback_window:]
         recent_vol = np.std(recent_returns)
         
+        # Update time warper settings if changed
+        if warping_alpha != self.time_warper.alpha:
+            self.time_warper.alpha = warping_alpha
+            # Recompute time warping
+            if self.volumes is not None and len(self.volumes) == len(self.prices):
+                self.time_map = self.time_warper.compute_time_transformation(self.prices, self.volumes)
+            else:
+                self.time_map = self.time_warper.compute_time_transformation(self.prices)
+            
         # Find similar volatility regimes in history using multiple metrics
         regime_windows = []
         recent_skew = stats.skew(recent_returns)
         recent_kurt = stats.kurtosis(recent_returns)
         
-        for i in range(len(historical_returns) - lookback_window):
-            window_returns = historical_returns[i:i+lookback_window]
-            window_vol = np.std(window_returns)
-            window_skew = stats.skew(window_returns)
-            window_kurt = stats.kurtosis(window_returns)
+        # If we're using trading time, incorporate dilation factors into regime matching
+        if use_trading_time:
+            # Get recent time dilation factors
+            recent_dilation = self.time_map['dilation_factors'][-lookback_window:]
+            recent_dilation_mean = np.mean(recent_dilation)
+            recent_dilation_std = np.std(recent_dilation)
             
-            # Calculate similarities using multiple metrics
-            vol_similarity = abs(window_vol - recent_vol) / recent_vol
-            skew_similarity = abs(window_skew - recent_skew)
-            kurt_similarity = abs(window_kurt - recent_kurt)
-            
-            # Combine similarities with weights
-            total_similarity = (0.6 * vol_similarity + 
-                              0.25 * skew_similarity + 
-                              0.15 * kurt_similarity)
-            
-            # If combined similarity is good enough, include this window
-            if total_similarity < 0.3:  # Start with stricter threshold
-                regime_windows.append(i)
-        
-        # Ensure we have enough similar windows, if not, gradually relax constraint
-        similarity_threshold = 0.3
-        while len(regime_windows) < 20 and similarity_threshold < 1.0:
-            similarity_threshold += 0.1  # More gradual relaxation
-            regime_windows = []
             for i in range(len(historical_returns) - lookback_window):
                 window_returns = historical_returns[i:i+lookback_window]
                 window_vol = np.std(window_returns)
                 window_skew = stats.skew(window_returns)
                 window_kurt = stats.kurtosis(window_returns)
                 
-                vol_similarity = abs(window_vol - recent_vol) / recent_vol
+                # Get time dilation for this window
+                window_dilation = self.time_map['dilation_factors'][i:i+lookback_window]
+                window_dilation_mean = np.mean(window_dilation)
+                window_dilation_std = np.std(window_dilation)
+                
+                # Calculate similarities using multiple metrics
+                vol_similarity = abs(window_vol - recent_vol) / max(recent_vol, 1e-8)
                 skew_similarity = abs(window_skew - recent_skew)
                 kurt_similarity = abs(window_kurt - recent_kurt)
                 
-                total_similarity = (0.6 * vol_similarity + 
-                                  0.25 * skew_similarity + 
-                                  0.15 * kurt_similarity)
+                # Time dilation similarity (both mean level and variability)
+                dilation_mean_sim = abs(window_dilation_mean - recent_dilation_mean) / max(recent_dilation_mean, 1e-8)
+                dilation_std_sim = abs(window_dilation_std - recent_dilation_std) / max(recent_dilation_std, 1e-8)
                 
-                if total_similarity < similarity_threshold:
+                # Combine similarities with weights (add time dilation factors)
+                total_similarity = (
+                    0.4 * vol_similarity + 
+                    0.15 * skew_similarity + 
+                    0.15 * kurt_similarity +
+                    0.2 * dilation_mean_sim +
+                    0.1 * dilation_std_sim
+                )
+                
+                # If combined similarity is good enough, include this window
+                if total_similarity < 0.3:  # Start with stricter threshold
                     regime_windows.append(i)
+        else:
+            # Original regime matching without time warping
+            for i in range(len(historical_returns) - lookback_window):
+                window_returns = historical_returns[i:i+lookback_window]
+                window_vol = np.std(window_returns)
+                window_skew = stats.skew(window_returns)
+                window_kurt = stats.kurtosis(window_returns)
+                
+                # Calculate similarities using multiple metrics
+                vol_similarity = abs(window_vol - recent_vol) / max(recent_vol, 1e-8)
+                skew_similarity = abs(window_skew - recent_skew)
+                kurt_similarity = abs(window_kurt - recent_kurt)
+                
+                # Combine similarities with weights
+                total_similarity = (
+                    0.6 * vol_similarity + 
+                    0.25 * skew_similarity + 
+                    0.15 * kurt_similarity
+                )
+                
+                # If combined similarity is good enough, include this window
+                if total_similarity < 0.3:  # Start with stricter threshold
+                    regime_windows.append(i)
+        
+        # Ensure we have enough similar windows, if not, gradually relax constraint
+        similarity_threshold = 0.3
+        while len(regime_windows) < 20 and similarity_threshold < 1.0:
+            similarity_threshold += 0.1  # More gradual relaxation
+            regime_windows = []
+            
+            if use_trading_time:
+                # With time warping
+                for i in range(len(historical_returns) - lookback_window):
+                    window_returns = historical_returns[i:i+lookback_window]
+                    window_vol = np.std(window_returns)
+                    window_skew = stats.skew(window_returns)
+                    window_kurt = stats.kurtosis(window_returns)
+                    
+                    # Get time dilation for this window
+                    window_dilation = self.time_map['dilation_factors'][i:i+lookback_window]
+                    window_dilation_mean = np.mean(window_dilation)
+                    window_dilation_std = np.std(window_dilation)
+                    
+                    # Calculate similarities
+                    vol_similarity = abs(window_vol - recent_vol) / max(recent_vol, 1e-8)
+                    skew_similarity = abs(window_skew - recent_skew)
+                    kurt_similarity = abs(window_kurt - recent_kurt)
+                    dilation_mean_sim = abs(window_dilation_mean - recent_dilation_mean) / max(recent_dilation_mean, 1e-8)
+                    dilation_std_sim = abs(window_dilation_std - recent_dilation_std) / max(recent_dilation_std, 1e-8)
+                    
+                    # Combined similarity
+                    total_similarity = (
+                        0.4 * vol_similarity + 
+                        0.15 * skew_similarity + 
+                        0.15 * kurt_similarity +
+                        0.2 * dilation_mean_sim +
+                        0.1 * dilation_std_sim
+                    )
+                    
+                    if total_similarity < similarity_threshold:
+                        regime_windows.append(i)
+            else:
+                # Original approach
+                for i in range(len(historical_returns) - lookback_window):
+                    window_returns = historical_returns[i:i+lookback_window]
+                    window_vol = np.std(window_returns)
+                    window_skew = stats.skew(window_returns)
+                    window_kurt = stats.kurtosis(window_returns)
+                    
+                    vol_similarity = abs(window_vol - recent_vol) / max(recent_vol, 1e-8)
+                    skew_similarity = abs(window_skew - recent_skew)
+                    kurt_similarity = abs(window_kurt - recent_kurt)
+                    
+                    total_similarity = (
+                        0.6 * vol_similarity + 
+                        0.25 * skew_similarity + 
+                        0.15 * kurt_similarity
+                    )
+                    
+                    if total_similarity < similarity_threshold:
+                        regime_windows.append(i)
         
         # Initialize paths array
         paths = np.zeros((n_paths, n_steps))
+        
+        # For trading time approach, store dilation factors for each path
+        if use_trading_time and enable_time_forecast:
+            path_dilation_factors = np.zeros((n_paths, n_steps))
         
         # Generate paths by sampling from similar regimes
         for i in range(n_paths):
@@ -567,12 +1121,123 @@ class FractalSimulator:
                 # Randomly select a continuous segment of length n_steps
                 segment_start = np.random.randint(0, len(regime_returns) - n_steps)
                 path_returns = regime_returns[segment_start:segment_start+n_steps]
+                
+                # For trading time approach, get corresponding dilation factors
+                if use_trading_time and enable_time_forecast:
+                    dilation_start = start_idx + segment_start
+                    dilation_end = dilation_start + n_steps
+                    if dilation_end <= len(self.time_map['dilation_factors']):
+                        path_dilation_factors[i] = self.time_map['dilation_factors'][dilation_start:dilation_end]
+                    else:
+                        # Use repeating recent values if we go beyond available factors
+                        recent_dilation = self.time_map['dilation_factors'][-lookback_window//2:]
+                        path_dilation_factors[i] = np.random.choice(recent_dilation, size=n_steps)
             else:
                 # Fallback to recent returns if no similar regimes found
                 path_returns = np.random.choice(recent_returns, size=n_steps, replace=True)
+                
+                # For trading time approach, fallback to recent dilation factors
+                if use_trading_time and enable_time_forecast:
+                    recent_dilation = self.time_map['dilation_factors'][-lookback_window//2:]
+                    path_dilation_factors[i] = np.random.choice(recent_dilation, size=n_steps)
             
             # Convert returns to price path
             paths[i] = self.prices[-1] * np.exp(np.cumsum(path_returns))
+        
+        # If using trading time, resample paths to account for time dilation
+        if use_trading_time and enable_time_forecast:
+            # Apply trading time transformations to each path
+            warped_paths = np.zeros_like(paths)
+            
+            for i in range(n_paths):
+                # Create a custom time warper for this path's forecasted time dilation
+                path_warper = TradingTimeWarper(alpha=self.time_warper.alpha)
+                
+                # Create a simple mapping of clock time to trading time for this path
+                dilation_factors = path_dilation_factors[i]
+                trading_time = np.cumsum(dilation_factors)
+                
+                # Normalize to same total duration
+                trading_time = trading_time * (n_steps - 1) / trading_time[-1]
+                
+                # Create a time map just for this path
+                path_time_map = {
+                    'trading_time_values': trading_time,
+                    'clock_time_indices': np.arange(n_steps),
+                    'dilation_factors': dilation_factors
+                }
+                
+                # Use our custom transformation on the path
+                x_orig = np.arange(n_steps)
+                y_orig = paths[i]
+                
+                # Create uniform grid in trading time
+                x_uniform = np.linspace(0, trading_time[-1], n_steps)
+                
+                # Resample onto uniform trading time grid (essentially stretching/compressing time)
+                warped_paths[i] = np.interp(x_uniform, trading_time, y_orig)
+            
+            # Replace original paths with time-warped paths
+            paths = warped_paths
+            
+        # Apply cross-dimensional filtering if enabled and we have volume data
+        cross_dim_weights = None
+        cross_dim_regime = None
+        
+        if use_cross_dim and self.cross_dim_analyzer is not None and self.volumes is not None:
+            # We'll score each path based on how well it matches the cross-dimensional
+            # fractal properties of the historical data
+            
+            cross_dim_weights = np.ones(n_paths)
+            
+            # Get current regime information
+            cross_dim_regime = self.cross_dim_results.get('regime', {})
+            current_regime = cross_dim_regime.get('regime', 0)
+            regime_confidence = cross_dim_regime.get('confidence', 0.5)
+            
+            # Get cross correlation between price and volume
+            price_vol_corr = self.cross_dim_results.get('cross_correlation', [[1, 0], [0, 1]])[0][1]
+            
+            # Perform analysis on each path
+            for i in range(n_paths):
+                path = paths[i]
+                
+                # Create a fictional volume path that preserves the cross correlation
+                if hasattr(self, 'sampled_volumes') and self.sampled_volumes is not None:
+                    # Create a volume series that correlates with this path's price
+                    # at approximately the same level as in the historical data
+                    
+                    # Compute path returns
+                    path_returns = np.diff(np.log(path))
+                    
+                    # Measure price/volume correlation for this path
+                    # Check if we can use the simulated volume from the same regime
+                    if regime_windows and i < len(regime_windows):
+                        # Get historical volume data from this regime
+                        start_idx = regime_windows[i % len(regime_windows)]
+                        if start_idx + n_steps < len(self.volumes):
+                            # Extract a segment of historical volume
+                            sim_volume = self.volumes[start_idx:start_idx+n_steps-1]
+                            
+                            # Calculate log changes
+                            vol_changes = np.diff(np.log(sim_volume + 1))  # Add 1 to avoid log(0)
+                            
+                            # Calculate correlation
+                            if len(vol_changes) > 1 and len(path_returns) > 1:
+                                try:
+                                    # Calculate correlation between price and volume paths
+                                    path_corr = np.corrcoef(path_returns, vol_changes)[0, 1]
+                                    
+                                    # Calculate correlation similarity score
+                                    # Compare to historical price-volume correlation
+                                    corr_similarity = 1.0 - min(1.0, abs(path_corr - price_vol_corr))
+                                    
+                                    # Weight paths by similarity to historical correlation patterns
+                                    # Higher weights for paths that preserve the price-volume relationship
+                                    cross_dim_weights[i] = 0.2 + 0.8 * corr_similarity
+                                except:
+                                    # Keep default weight on error
+                                    pass
         
         # Cluster and analyze paths
         scaler = StandardScaler()
@@ -638,7 +1303,65 @@ class FractalSimulator:
         
         # Calculate final probabilities
         size_probs = cluster_sizes / n_paths
+        
+        # Start with standard pattern-based scoring
         combined_scores = (1 - pattern_weight) * size_probs + pattern_weight * cluster_scores
+        
+        # Incorporate cross-dimensional weights if available
+        # Apply quantum price level filtering if enabled
+        quantum_weights = None
+        
+        if use_quantum_levels and self.quantum_generator is not None:
+            # Filter paths based on how well they respect quantum price levels
+            quantum_weights = self.quantum_generator.filter_paths_by_levels(
+                paths, influence_strength=quantum_influence
+            )
+        
+        # Apply cross-dimensional filtering if available
+        if cross_dim_weights is not None:
+            # Calculate average cross-dimensional weight for each cluster
+            cluster_cross_weights = np.zeros(n_clusters)
+            for i in range(n_clusters):
+                cluster_indices = np.where(labels == i)[0]
+                if len(cluster_indices) > 0:
+                    # Average cross-dimensional weight for this cluster
+                    cluster_cross_weights[i] = np.mean(cross_dim_weights[cluster_indices])
+                else:
+                    cluster_cross_weights[i] = 1.0  # Default if no paths in cluster
+            
+            # Normalize to [0, 1] if needed
+            if np.sum(cluster_cross_weights) > 0:
+                cluster_cross_weights = cluster_cross_weights / np.max(cluster_cross_weights)
+            else:
+                cluster_cross_weights = np.ones(n_clusters)
+            
+            # Blend in cross-dimensional weights (give them 30% influence)
+            cross_dim_weight = 0.3
+            combined_scores = (1 - cross_dim_weight) * combined_scores + cross_dim_weight * cluster_cross_weights
+            
+        # Apply quantum level filtering if available
+        if quantum_weights is not None:
+            # Calculate average quantum weight for each cluster
+            cluster_quantum_weights = np.zeros(n_clusters)
+            for i in range(n_clusters):
+                cluster_indices = np.where(labels == i)[0]
+                if len(cluster_indices) > 0:
+                    # Average quantum weight for this cluster
+                    cluster_quantum_weights[i] = np.mean(quantum_weights[cluster_indices])
+                else:
+                    cluster_quantum_weights[i] = 1.0  # Default if no paths in cluster
+            
+            # Normalize to [0, 1] if needed
+            if np.sum(cluster_quantum_weights) > 0:
+                cluster_quantum_weights = cluster_quantum_weights / np.max(cluster_quantum_weights)
+            else:
+                cluster_quantum_weights = np.ones(n_clusters)
+            
+            # Blend in quantum weights (give them 30% influence)
+            q_weight = 0.3
+            combined_scores = (1 - q_weight) * combined_scores + q_weight * cluster_quantum_weights
+            
+        # Normalize probabilities
         cluster_probs = combined_scores / np.sum(combined_scores)
         
         # Find most likely path
@@ -672,16 +1395,39 @@ class FractalSimulator:
             # Calculate probability based on multiple factors:
             # 1. Volatility similarity to recent regime
             path_vol = np.std(cloud_returns)
-            vol_similarity = abs(path_vol - recent_vol) / recent_vol
+            vol_similarity = abs(path_vol - recent_vol) / max(recent_vol, 1e-8)
             
             # 2. Return distribution similarity
             path_skew = stats.skew(cloud_returns)
-            recent_skew = stats.skew(recent_returns)
+            path_kurt = stats.kurtosis(cloud_returns)
             skew_similarity = abs(path_skew - recent_skew)
+            kurt_similarity = abs(path_kurt - recent_kurt)
             
-            # Combine similarities with weights
-            total_similarity = (0.7 * vol_similarity + 0.3 * skew_similarity)
-            path_probabilities[i] = np.exp(-2 * total_similarity)  # Less aggressive decay
+            # 3. For trading time, add time dilation similarity
+            if use_trading_time and enable_time_forecast:
+                # Compare path's implied time dilation with recent dilation
+                dilation_similarity = 0.0
+                # We would calculate this from the path's characteristics, but as an approximation:
+                volatility_ratio = path_vol / recent_vol
+                # Higher volatility implies faster trading time
+                implied_dilation = np.power(volatility_ratio, self.time_warper.alpha)
+                dilation_similarity = abs(implied_dilation - recent_dilation_mean) / max(recent_dilation_mean, 1e-8)
+                
+                # Combine similarities with trading time component
+                total_similarity = (
+                    0.5 * vol_similarity + 
+                    0.2 * skew_similarity +
+                    0.1 * kurt_similarity +
+                    0.2 * dilation_similarity
+                )
+            else:
+                # Original similarity calculation
+                total_similarity = (0.7 * vol_similarity + 0.3 * skew_similarity)
+                
+            # Calculate probability - less aggressive decay    
+            path_probabilities[i] = np.exp(-2 * total_similarity)
+            
+        # Distance-based probabilities (alternative approach)
         for i, path in enumerate(cloud_paths):
             distance = np.mean(np.abs(path - most_likely_path))
             path_probabilities[i] = np.exp(-distance / np.std(most_likely_path))
@@ -721,7 +1467,15 @@ class FractalSimulator:
             'cluster_probs': cluster_probs,
             'most_likely_path': most_likely_path,
             'probability_cloud': cloud_paths,
-            'path_probabilities': path_probabilities
+            'path_probabilities': path_probabilities,
+            'trading_time_enabled': use_trading_time,
+            'time_dilation_factors': self.time_map['dilation_factors'][-lookback_window:] if use_trading_time else None,
+            'cross_dim_enabled': use_cross_dim and cross_dim_weights is not None,
+            'cross_dim_regime': cross_dim_regime,
+            'cross_dim_weights': cross_dim_weights.tolist() if cross_dim_weights is not None else None,
+            'quantum_levels_enabled': use_quantum_levels,
+            'quantum_levels': self.quantum_levels,
+            'quantum_weights': quantum_weights.tolist() if quantum_weights is not None else None
         }
 
     def _compute_path_pattern_similarity(self, prices: np.ndarray, patterns: list) -> np.ndarray:
@@ -995,6 +1749,183 @@ class FractalSimulator:
             print(f"GPU simulation failed: {e}, falling back to CPU")
             return self.simulate_paths_fast(n_steps, n_paths)
 
+class TradingTimeWarper:
+    """
+    Transforms between clock time and trading time based on volatility regimes.
+    
+    This class implements Mandelbrot's concept that markets operate on their own
+    time scale that flows faster during high volatility and slower during low volatility.
+    """
+    
+    def __init__(self, alpha: float = 0.5, min_scale: float = 0.1, max_scale: float = 10.0):
+        """
+        Initialize trading time warper.
+        
+        Args:
+            alpha: Scaling factor that controls transformation intensity (0.5 default)
+            min_scale: Minimum scaling factor to prevent extreme compression (0.1 default)
+            max_scale: Maximum scaling factor to prevent extreme expansion (10.0 default)
+        """
+        self.alpha = alpha
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+        self.time_map = None
+        self.inverse_map = None
+        
+    def compute_time_transformation(self, prices: np.ndarray, volumes: np.ndarray = None) -> Dict:
+        """
+        Compute transformation between clock time and trading time.
+        
+        Args:
+            prices: Historical price series
+            volumes: Optional volume series (if available)
+            
+        Returns:
+            Dictionary with time mapping information
+        """
+        n = len(prices)
+        
+        # Calculate returns and volatility
+        log_returns = np.diff(np.log(prices))
+        
+        # Use rolling windows to estimate local volatility
+        window_sizes = [5, 21, 63]  # Day, week, month in trading days
+        volatility_series = {}
+        
+        for window in window_sizes:
+            # Compute rolling volatility with window
+            vol = np.zeros(n)
+            for i in range(window, n):
+                vol[i] = np.std(log_returns[i-window:i]) * np.sqrt(252)  # Annualized
+            
+            # Fill initial points with first valid value
+            vol[:window] = vol[window]
+            volatility_series[window] = vol
+        
+        # Combine volatilities with different weights (emphasize recent)
+        weights = {5: 0.6, 21: 0.3, 63: 0.1}
+        combined_vol = np.zeros(n)
+        
+        for window, vol in volatility_series.items():
+            combined_vol += weights[window] * vol
+            
+        # Normalize volatility to have mean 1
+        relative_vol = combined_vol / np.mean(combined_vol)
+        
+        # If volumes are provided, incorporate them
+        if volumes is not None and len(volumes) == n:
+            # Normalize volumes to have mean 1
+            relative_vol_normalized = volumes / np.mean(volumes)
+            # Combined activity measure (volatility and volume)
+            activity = np.sqrt(relative_vol * relative_vol_normalized)
+        else:
+            # Just use volatility if volume not available
+            activity = relative_vol
+        
+        # Apply power transformation with bounds
+        time_dilation = np.power(activity, self.alpha)
+        time_dilation = np.clip(time_dilation, self.min_scale, self.max_scale)
+        
+        # Compute cumulative trading time
+        trading_time = np.cumsum(time_dilation)
+        
+        # Normalize to span same overall duration
+        trading_time = trading_time * (n - 1) / trading_time[-1]
+        
+        # Store the mapping
+        self.time_map = {
+            'clock_to_trading': trading_time,
+            'trading_time_values': trading_time,
+            'clock_time_indices': np.arange(n),
+            'dilation_factors': time_dilation,
+            'activity': activity
+        }
+        
+        return self.time_map
+    
+    def transform_to_trading_time(self, series: np.ndarray) -> np.ndarray:
+        """
+        Transform a time series from clock time to trading time.
+        
+        Args:
+            series: Time series in clock time
+            
+        Returns:
+            Time series resampled to trading time
+        """
+        if self.time_map is None:
+            raise ValueError("Must call compute_time_transformation first")
+            
+        # Get original points
+        x_orig = np.arange(len(series))
+        y_orig = series
+        
+        # Get trading time points
+        x_trading = self.time_map['trading_time_values']
+        
+        # Create uniform grid in trading time
+        x_uniform = np.linspace(0, x_trading[-1], len(series))
+        
+        # Resample onto uniform trading time grid
+        y_trading = np.interp(x_uniform, x_trading, y_orig)
+        
+        return y_trading
+    
+    def transform_path_to_trading_time(self, path: np.ndarray) -> np.ndarray:
+        """
+        Transform a path from clock time to trading time.
+        
+        Args:
+            path: Path in clock time
+            
+        Returns:
+            Path resampled to trading time
+        """
+        return self.transform_to_trading_time(path)
+    
+    def transform_paths_to_trading_time(self, paths: np.ndarray) -> np.ndarray:
+        """
+        Transform multiple paths from clock time to trading time.
+        
+        Args:
+            paths: Array of paths in clock time (n_paths, n_steps)
+            
+        Returns:
+            Array of paths in trading time
+        """
+        warped_paths = np.zeros_like(paths)
+        
+        for i in range(paths.shape[0]):
+            warped_paths[i] = self.transform_path_to_trading_time(paths[i])
+            
+        return warped_paths
+    
+    def transform_to_clock_time(self, trading_series: np.ndarray) -> np.ndarray:
+        """
+        Transform a time series from trading time to clock time.
+        
+        Args:
+            trading_series: Time series in trading time
+            
+        Returns:
+            Time series resampled to clock time
+        """
+        if self.time_map is None:
+            raise ValueError("Must call compute_time_transformation first")
+            
+        # Create uniform trading time grid (assuming trading_series is on uniform grid)
+        x_trading_uniform = np.linspace(0, self.time_map['trading_time_values'][-1], len(trading_series))
+        
+        # Get original time points
+        x_clock = np.arange(len(self.time_map['trading_time_values']))
+        x_trading = self.time_map['trading_time_values']
+        
+        # Resample from uniform trading time back to clock time
+        resampled = np.interp(x_trading, x_trading_uniform, trading_series)
+        
+        return resampled
+
+
 class PathAnalyzer:
     """Analyzes and clusters simulation paths."""
     
@@ -1035,6 +1966,387 @@ class PathAnalyzer:
 
 class FractalVisualizer:
     """Creates interactive visualizations of fractal analysis and simulations."""
+    
+    @staticmethod
+    def plot_cross_dimensional_analysis(
+        prices: np.ndarray,
+        volumes: np.ndarray, 
+        cross_dim_results: Dict,
+        dates: np.ndarray = None
+    ) -> go.Figure:
+        """
+        Create visualization of cross-dimensional fractal analysis.
+        
+        Args:
+            prices: Price time series
+            volumes: Volume time series
+            cross_dim_results: Results from cross-dimensional analysis
+            dates: Optional dates array
+            
+        Returns:
+            Plotly figure with visualization
+        """
+        if dates is None:
+            dates = np.arange(len(prices))
+        
+        # Create figure with subplots
+        fig = make_subplots(
+            rows=3, cols=2,
+            subplot_titles=(
+                "Price and Volume",
+                "Price-Volume Correlation",
+                "Fractal Metrics by Dimension",
+                "Regime Classification",
+                "Cross-Dimensional Coherence",
+                "Correlation Heatmap"
+            ),
+            vertical_spacing=0.08,
+            horizontal_spacing=0.1,
+            specs=[
+                [{"type": "xy"}, {"type": "xy"}],
+                [{"type": "bar"}, {"type": "xy"}],
+                [{"type": "bar"}, {"type": "heatmap"}],
+            ],
+            column_widths=[0.6, 0.4],
+            row_heights=[0.4, 0.3, 0.3]
+        )
+        
+        # 1. Price and Volume plot with shared axis
+        
+        # Create a secondary y-axis for volume
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=prices,
+                name="Price",
+                line=dict(color='blue', width=1.5)
+            ),
+            row=1, col=1
+        )
+        
+        # Add volume as bars
+        fig.add_trace(
+            go.Bar(
+                x=dates,
+                y=volumes,
+                name="Volume",
+                marker=dict(color='rgba(100,100,100,0.3)'),
+                opacity=0.3
+            ),
+            row=1, col=1
+        )
+        
+        # 2. Price-Volume correlation
+        # Get log returns for price and volume
+        price_returns = np.diff(np.log(prices))
+        volume_returns = np.diff(np.log(volumes+1))  # Add 1 to avoid log(0)
+        
+        # Calculate rolling correlation
+        window = min(30, len(price_returns)//5)
+        rolling_corr = np.zeros(len(price_returns) - window + 1)
+        
+        for i in range(len(rolling_corr)):
+            if i+window <= len(price_returns):
+                try:
+                    corr = np.corrcoef(
+                        price_returns[i:i+window],
+                        volume_returns[i:i+window]
+                    )[0, 1]
+                    rolling_corr[i] = corr
+                except:
+                    rolling_corr[i] = 0
+        
+        # Plot rolling correlation
+        corr_dates = dates[window:]
+        fig.add_trace(
+            go.Scatter(
+                x=corr_dates,
+                y=rolling_corr,
+                name="P-V Correlation",
+                line=dict(color='purple', width=1.5)
+            ),
+            row=1, col=2
+        )
+        
+        # Add zero reference line
+        fig.add_trace(
+            go.Scatter(
+                x=[dates[0], dates[-1]],
+                y=[0, 0],
+                name="Zero Correlation",
+                line=dict(color='gray', width=1, dash='dash'),
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+        
+        # 3. Fractal Metrics by Dimension
+        fractal_dims = cross_dim_results.get('fractal_dimensions', {})
+        hurst_exps = cross_dim_results.get('hurst_exponents', {})
+        
+        dimensions = list(fractal_dims.keys())
+        
+        # Fractal dimensions
+        fig.add_trace(
+            go.Bar(
+                x=dimensions,
+                y=[fractal_dims.get(dim, 0) for dim in dimensions],
+                name="Fractal Dimension",
+                marker_color='blue'
+            ),
+            row=2, col=1
+        )
+        
+        # Add Hurst exponents
+        fig.add_trace(
+            go.Bar(
+                x=dimensions,
+                y=[hurst_exps.get(dim, 0) for dim in dimensions],
+                name="Hurst Exponent",
+                marker_color='red'
+            ),
+            row=2, col=1
+        )
+        
+        # 4. Regime Classification
+        regime_info = cross_dim_results.get('regime', {})
+        current_regime = regime_info.get('regime', 0)
+        confidence = regime_info.get('confidence', 0.5)
+        n_regimes = regime_info.get('n_regimes', 3)
+        
+        # Define regime names
+        regime_names = ["Trending", "Mean-Reverting", "Random Walk"]
+        
+        # Plot regime gauge
+        fig.add_trace(
+            go.Indicator(
+                mode="gauge+number+delta",
+                value=current_regime,
+                title={"text": f"Current Regime: {regime_names[current_regime]}"},
+                gauge={
+                    'axis': {'range': [0, n_regimes-1], 'tickvals': list(range(n_regimes))},
+                    'bar': {'color': "darkblue"},
+                    'steps': [
+                        {'range': [0, 1], 'color': "lightgreen"},
+                        {'range': [1, 2], 'color': "orange"},
+                        {'range': [2, 3], 'color': "lightgray"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': current_regime
+                    }
+                },
+                delta={'reference': 1, 'increasing': {'color': "green"}}
+            ),
+            row=2, col=2
+        )
+        
+        # 5. Cross-Dimensional Coherence
+        coherence = cross_dim_results.get('fractal_coherence', {}).get('overall', 0)
+        
+        # Create labels and values for coherence
+        coherence_labels = ['Overall Coherence']
+        coherence_values = [coherence]
+        
+        fig.add_trace(
+            go.Bar(
+                x=coherence_labels,
+                y=coherence_values,
+                name="Coherence",
+                marker_color='green'
+            ),
+            row=3, col=1
+        )
+        
+        # 6. Correlation Heatmap
+        corr_matrix = np.array(cross_dim_results.get('cross_correlation', [[1, 0], [0, 1]]))
+        
+        fig.add_trace(
+            go.Heatmap(
+                z=corr_matrix,
+                x=dimensions,
+                y=dimensions,
+                colorscale='Viridis',
+                zmin=-1,
+                zmax=1,
+                colorbar=dict(title="Correlation")
+            ),
+            row=3, col=2
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title="Cross-Dimensional Fractal Analysis",
+            height=1000,
+            width=1200,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        # Update axes
+        fig.update_xaxes(title_text="Date", row=1, col=1)
+        fig.update_yaxes(title_text="Price", row=1, col=1)
+        
+        fig.update_xaxes(title_text="Date", row=1, col=2)
+        fig.update_yaxes(title_text="Correlation", row=1, col=2)
+        
+        fig.update_xaxes(title_text="Dimension", row=2, col=1)
+        fig.update_yaxes(title_text="Value", row=2, col=1)
+        
+        fig.update_xaxes(title_text="Metric", row=3, col=1)
+        fig.update_yaxes(title_text="Value", row=3, col=1)
+        
+        return fig
+    
+    @staticmethod
+    def plot_trading_time_analysis(
+        prices: np.ndarray,
+        time_map: Dict,
+        dates: np.ndarray = None
+    ) -> go.Figure:
+        """Create visualization showing trading time vs clock time analysis."""
+        if dates is None:
+            dates = np.arange(len(prices))
+        
+        # Get time dilation factors
+        dilation_factors = time_map['dilation_factors']
+        trading_time = time_map['trading_time_values']
+        
+        # Create figure with subplots
+        fig = make_subplots(
+            rows=3, cols=1, 
+            subplot_titles=(
+                "Price Series with Time Dilation Markers",
+                "Trading Time vs Clock Time Mapping",
+                "Time Dilation Factors"
+            ),
+            shared_xaxes=True,
+            vertical_spacing=0.1,
+            row_heights=[0.5, 0.25, 0.25]
+        )
+        
+        # Add price series with markers sized by time dilation
+        # Colors for volatility: blue (slow) to red (fast time)
+        colors = []
+        scaled_dilation = (dilation_factors - np.min(dilation_factors)) / (np.max(dilation_factors) - np.min(dilation_factors))
+        
+        for i in range(len(scaled_dilation)):
+            if scaled_dilation[i] < 0.33:
+                colors.append('rgba(0,0,255,0.7)')  # Blue for slow regions
+            elif scaled_dilation[i] < 0.66:
+                colors.append('rgba(0,128,0,0.7)')  # Green for medium regions
+            else:
+                colors.append('rgba(255,0,0,0.7)')  # Red for fast regions
+        
+        # Plot price with markers
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=prices,
+                mode='lines',
+                name='Price',
+                line=dict(width=1, color='rgba(100,100,100,0.8)')
+            ),
+            row=1, col=1
+        )
+        
+        # Add time dilation as markers on price
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=prices,
+                mode='markers',
+                name='Time Dilation',
+                marker=dict(
+                    size=dilation_factors * 5,  # Scale marker size 
+                    color=colors,
+                    symbol='circle',
+                    line=dict(width=0)
+                ),
+                hovertemplate="Date: %{x}<br>Price: %{y:.2f}<br>Time Dilation: %{marker.size:.2f}"
+            ),
+            row=1, col=1
+        )
+        
+        # Plot trading time vs clock time
+        fig.add_trace(
+            go.Scatter(
+                x=np.arange(len(trading_time)),
+                y=trading_time,
+                mode='lines',
+                name='Trading Time',
+                line=dict(color='purple', width=2)
+            ),
+            row=2, col=1
+        )
+        
+        # Add reference line (y=x)
+        linear_time = np.linspace(0, trading_time[-1], len(trading_time))
+        fig.add_trace(
+            go.Scatter(
+                x=np.arange(len(trading_time)),
+                y=linear_time,
+                mode='lines',
+                name='Linear Time',
+                line=dict(color='gray', width=1, dash='dash')
+            ),
+            row=2, col=1
+        )
+        
+        # Plot time dilation factors
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=dilation_factors,
+                mode='lines',
+                name='Time Dilation',
+                line=dict(color='red', width=2),
+                fill='tozeroy'
+            ),
+            row=3, col=1
+        )
+        
+        # Add a horizontal line at dilation = 1 (neutral)
+        fig.add_trace(
+            go.Scatter(
+                x=[dates[0], dates[-1]],
+                y=[1, 1],
+                mode='lines',
+                name='Neutral Time',
+                line=dict(color='gray', width=1, dash='dash')
+            ),
+            row=3, col=1
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title="Trading Time Analysis: Market Time Dilation",
+            height=900,
+            width=1000,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+        )
+        
+        fig.update_yaxes(title_text="Price", row=1, col=1)
+        fig.update_yaxes(title_text="Trading Time", row=2, col=1)
+        fig.update_yaxes(title_text="Dilation Factor", row=3, col=1)
+        
+        fig.update_xaxes(title_text="Date", row=3, col=1)
+        
+        return fig
     
     @staticmethod
     def plot_analysis_and_forecast(
