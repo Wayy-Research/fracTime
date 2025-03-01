@@ -34,6 +34,34 @@ uv pip install -e .
 
 ## Usage
 
+### Interactive Web Application
+
+You can run the interactive web application using the provided start script:
+
+```bash
+./start_app.sh
+```
+
+Or directly with Streamlit:
+
+```bash
+streamlit run Home.py
+```
+
+The application will be available at http://localhost:8501 in your browser.
+
+### App Structure
+
+The FracTime app is organized into three main pages:
+
+1. **Home**: Introduction and overview of capabilities
+2. **Analysis**: Interactive analysis tools and visualizations
+3. **Explanations**: Detailed explanations of the theory and how to interpret results
+
+### API Usage
+
+For programmatic usage:
+
 ```python
 from fractime import analyze_timeseries, simulate_paths
 

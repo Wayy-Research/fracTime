@@ -1,0 +1,7 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: fractime-cert
+spec:
+  domains:
+    - fractime.example.com  # Replace with your actual domain

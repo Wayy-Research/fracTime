@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fractime-app
+  labels:
+    app: fractime
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fractime
+  template:
+    metadata:
+      labels:
+        app: fractime
+    spec:
+      containers:
+      - name: fractime
+        image: gcr.io/YOUR_PROJECT_ID/fractime:latest
+        ports:
+        - containerPort: 8501
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        env:
+        - name: ENVIRONMENT
+          value: "production"
