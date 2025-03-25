@@ -373,6 +373,35 @@ class MultidimensionalFractalAnalyzer:
             'histogram': hist.tolist()
         }
 
+class QuantumPriceLevels:
+    """Generates quantum price levels based on quantum mechanical principles."""
+
+    def __init__(self, num_levels=7, period=30):
+        """
+        Initialize the quantum price level calculator.
+        
+        Args:
+            num_levels: Number of price levels to generate
+            period: Time period for the price level calculation
+        """
+        self.num_levels = num_levels
+        self.period = period
+        self._generator = QuantumPriceLevelGenerator(time_horizon=period/252, energy_levels=num_levels)
+        
+    def calculate_levels(self, prices):
+        """
+        Calculate quantum price levels from price data.
+        
+        Args:
+            prices: Array of price data
+        
+        Returns:
+            Array of calculated price levels
+        """
+        result = self._generator.generate_price_levels(prices)
+        return [level["price"] for level in result["levels"]]
+
+
 class QuantumPriceLevelGenerator:
     """
     Generates quantum price levels based on quantum mechanical principles.

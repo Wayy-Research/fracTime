@@ -62,17 +62,5 @@ echo "Access the app at: http://localhost:8501"
 echo "Press Ctrl+C to stop the application"
 echo "-----------------------------"
 
-# Try to run with standard settings first
+# Run streamlit
 streamlit run Home.py
-
-# If that fails, try with headless mode
-if [ $? -ne 0 ]; then
-    echo "⚠️ Standard mode failed, trying headless mode..."
-    streamlit run Home.py --server.headless=true
-fi
-
-# If still fails, try with different port
-if [ $? -ne 0 ]; then
-    echo "⚠️ Trying with alternative port..."
-    streamlit run Home.py --server.port=8502
-fi

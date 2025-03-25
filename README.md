@@ -22,64 +22,59 @@ FracTime is an advanced time series forecasting tool that leverages fractal geom
   - Representative path selection
   - Empirical confidence intervals
 
-## Installation
+## Quick Start
 
-FracTime uses `uv` for dependency management. To install:
+FracTime uses `uv` for dependency management:
 
 ```bash
+# Create and activate virtual environment
 uv venv
 source .venv/bin/activate
+
+# Install the package
 uv pip install -e .
-```
 
-## Usage
+# Install development dependencies
+uv pip install -e ".[dev]"
 
-### Interactive Web Application
-
-You can run the interactive web application using the provided start script:
-
-```bash
-./start_app.sh
-```
-
-Or directly with Streamlit:
-
-```bash
+# Run the Streamlit application
 streamlit run Home.py
 ```
 
 The application will be available at http://localhost:8501 in your browser.
 
-### App Structure
+## App Structure
 
-The FracTime app is organized into three main pages:
+The FracTime app consists of three main pages:
 
 1. **Home**: Introduction and overview of capabilities
 2. **Analysis**: Interactive analysis tools and visualizations
 3. **Explanations**: Detailed explanations of the theory and how to interpret results
 
-### API Usage
+## Running Tests
 
-For programmatic usage:
+```bash
+# Run all tests
+pytest
 
-```python
-from fractime import analyze_timeseries, simulate_paths
+# Run specific test file
+pytest tests/test_core.py
 
-# Load and analyze time series
-results = analyze_timeseries(data)
-
-# Generate simulated paths
-paths = simulate_paths(data, n_paths=1000)
+# Run a specific test
+pytest tests/test_core.py::test_sample_data
 ```
 
 ## Development
 
 ```bash
-# Install development dependencies
-uv pip install -e ".[dev]"
+# Formatting
+black fractime/ tests/
 
-# Run tests
-pytest
+# Linting
+ruff check fractime/ tests/
+
+# Type checking
+mypy fractime/
 ```
 
 ## Requirements
