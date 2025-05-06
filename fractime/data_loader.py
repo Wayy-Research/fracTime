@@ -1,12 +1,12 @@
 """
-Time Series Data Loader Module for FracTime
+Time Series Data Loader Module for FracTime using Polars
 
 This module provides utilities for loading time series data from various sources
-including financial databases, UCI repository, and more.
+including financial databases, UCI repository, and more, using Polars for efficient data processing.
 """
 
 import os
-import pandas as pd
+import polars as pl
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Union, List, Dict, Tuple, Any
@@ -38,7 +38,7 @@ except ImportError:
 
 class TimeSeriesDataLoader:
     """
-    A class for loading time series data from various sources.
+    A class for loading time series data from various sources using Polars.
     
     Attributes:
         data_dir (Path): Directory to store downloaded data
@@ -65,7 +65,7 @@ class TimeSeriesDataLoader:
                        start_date: Union[str, datetime], 
                        end_date: Optional[Union[str, datetime]] = None,
                        interval: str = "1d",
-                       force_download: bool = False) -> pd.DataFrame:
+                       force_download: bool = False) -> pl.DataFrame:
         """
         Load financial data from Yahoo Finance.
         
@@ -77,7 +77,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if cached data exists
             
         Returns:
-            DataFrame with OHLCV data
+            Polars DataFrame with OHLCV data
         """
         if not YFINANCE_AVAILABLE:
             raise ImportError("yfinance package is required but not installed. "
@@ -85,20 +85,22 @@ class TimeSeriesDataLoader:
         
         # Handle date inputs
         if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
+            start_date = pl.from_pandas(pd.to_datetime(start_date))
         
         if end_date is None:
             end_date = datetime.now()
         elif isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
+            end_date = pl.from_pandas(pd.to_datetime(end_date))
             
         # Cache file path
-        cache_file = self.cache_dir / f"yahoo_{symbol}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{interval}.pkl"
+        start_date_str = start_date.strftime('%Y%m%d') if isinstance(start_date, datetime) else start_date
+        end_date_str = end_date.strftime('%Y%m%d') if isinstance(end_date, datetime) else end_date
+        cache_file = self.cache_dir / f"yahoo_{symbol}_{start_date_str}_{end_date_str}_{interval}.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Downloading fresh data.")
         
@@ -108,20 +110,21 @@ class TimeSeriesDataLoader:
         if df.empty:
             raise ValueError(f"No data found for symbol {symbol}")
             
-        # Reset index to make Date a column
+        # Convert pandas to polars DataFrame
         df = df.reset_index()
+        df_pl = pl.from_pandas(df)
         
         # Save to cache
-        df.to_pickle(cache_file)
+        df_pl.write_parquet(cache_file)
         
-        return df
+        return df_pl
 
     def get_fred_data(self, 
                      series_id: Union[str, List[str]], 
                      start_date: Union[str, datetime], 
                      end_date: Optional[Union[str, datetime]] = None,
                      api_key: Optional[str] = None,
-                     force_download: bool = False) -> pd.DataFrame:
+                     force_download: bool = False) -> pl.DataFrame:
         """
         Load economic data from Federal Reserve Economic Database (FRED).
         
@@ -133,7 +136,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if cached data exists
             
         Returns:
-            DataFrame with economic data
+            Polars DataFrame with economic data
         """
         if not FRED_AVAILABLE:
             raise ImportError("fredapi package is required but not installed. "
@@ -146,12 +149,12 @@ class TimeSeriesDataLoader:
             
         # Handle date inputs
         if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
         
         if end_date is None:
             end_date = datetime.now()
         elif isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
             
         # Convert to list if single series_id
         if isinstance(series_id, str):
@@ -159,12 +162,12 @@ class TimeSeriesDataLoader:
             
         # Generate cache file name
         series_str = "_".join(series_id)
-        cache_file = self.cache_dir / f"fred_{series_str}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pkl"
+        cache_file = self.cache_dir / f"fred_{series_str}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Downloading fresh data.")
         
@@ -182,17 +185,20 @@ class TimeSeriesDataLoader:
         df.index.name = 'Date'
         df = df.reset_index()
         
-        # Save to cache
-        df.to_pickle(cache_file)
+        # Convert to polars
+        df_pl = pl.from_pandas(df)
         
-        return df
+        # Save to cache
+        df_pl.write_parquet(cache_file)
+        
+        return df_pl
 
     def get_quandl_data(self, 
                        dataset_code: str,
                        start_date: Union[str, datetime], 
                        end_date: Optional[Union[str, datetime]] = None,
                        api_key: Optional[str] = None,
-                       force_download: bool = False) -> pd.DataFrame:
+                       force_download: bool = False) -> pl.DataFrame:
         """
         Load data from Quandl.
         
@@ -204,7 +210,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if cached data exists
             
         Returns:
-            DataFrame with requested data
+            Polars DataFrame with requested data
         """
         if not QUANDL_AVAILABLE:
             raise ImportError("quandl package is required but not installed. "
@@ -217,20 +223,20 @@ class TimeSeriesDataLoader:
             
         # Handle date inputs
         if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
         
         if end_date is None:
             end_date = datetime.now()
         elif isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
             
         # Cache file path
-        cache_file = self.cache_dir / f"quandl_{dataset_code.replace('/', '_')}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pkl"
+        cache_file = self.cache_dir / f"quandl_{dataset_code.replace('/', '_')}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Downloading fresh data.")
         
@@ -240,15 +246,16 @@ class TimeSeriesDataLoader:
         if df.empty:
             raise ValueError(f"No data found for dataset {dataset_code}")
             
-        # Reset index to make Date a column
+        # Convert to polars
         df = df.reset_index()
+        df_pl = pl.from_pandas(df)
         
         # Save to cache
-        df.to_pickle(cache_file)
+        df_pl.write_parquet(cache_file)
         
-        return df
+        return df_pl
 
-    def load_uci_air_quality(self, force_download: bool = False) -> pd.DataFrame:
+    def load_uci_air_quality(self, force_download: bool = False) -> pl.DataFrame:
         """
         Load the UCI Air Quality dataset.
         
@@ -256,16 +263,16 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the file exists locally
             
         Returns:
-            DataFrame with air quality time series data
+            Polars DataFrame with air quality time series data
         """
         # File paths
         data_file = self.data_dir / "AirQualityUCI.csv"
-        cache_file = self.cache_dir / "uci_air_quality.pkl"
+        cache_file = self.cache_dir / "uci_air_quality.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Processing raw data.")
         
@@ -283,34 +290,41 @@ class TimeSeriesDataLoader:
                 with open(data_file, 'wb') as f:
                     f.write(z.read('AirQualityUCI.csv'))
         
-        # Process the data
-        df = pd.read_csv(data_file, sep=';', decimal=',')
+        # Process the data with polars
+        df = pl.read_csv(data_file, separator=';', decimal_separator=',')
         
         # Clean and prepare the data
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
-        df['Time'] = pd.to_datetime(df['Time'], format='%H.%M.%S').dt.time
+        df = df.with_columns([
+            pl.col('Date').str.strptime(pl.Date, '%d/%m/%Y', strict=False),
+            pl.col('Time').str.strptime(pl.Time, '%H.%M.%S', strict=False)
+        ])
         
         # Combine date and time
-        df['DateTime'] = df.apply(
-            lambda row: datetime.combine(row['Date'], row['Time']), 
-            axis=1
-        )
+        df = df.with_columns([
+            pl.concat_str([pl.col('Date').cast(pl.Utf8), pl.lit(' '), pl.col('Time').cast(pl.Utf8)])
+            .str.strptime(pl.Datetime, '%Y-%m-%d %H:%M:%S')
+            .alias('DateTime')
+        ])
         
-        # Set as index and drop original columns
-        df = df.drop(['Date', 'Time'], axis=1)
-        df = df.set_index('DateTime')
+        # Drop original columns
+        df = df.drop(['Date', 'Time'])
         
-        # Replace -200 values (missing data) with NaN
-        df = df.replace(-200, np.nan)
+        # Replace -200 values (missing data) with null
+        df = df.with_columns([
+            pl.when(pl.col(col) == -200).then(None).otherwise(pl.col(col))
+            for col in df.columns if col != 'DateTime'
+        ])
         
         # Drop unnamed column if it exists
         if 'Unnamed: 15' in df.columns:
-            df = df.drop('Unnamed: 15', axis=1)
-            
-        df = df.reset_index().rename(columns={'DateTime': 'Date'})
+            df = df.drop('Unnamed: 15')
+        
+        # Ensure DateTime is first column and rename it to Date for consistency
+        df = df.select(['DateTime'] + [col for col in df.columns if col != 'DateTime'])
+        df = df.rename({'DateTime': 'Date'})
         
         # Save to cache
-        df.to_pickle(cache_file)
+        df.write_parquet(cache_file)
         
         return df
 
@@ -323,7 +337,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the files exist locally
             
         Returns:
-            Dictionary containing train and test data
+            Dictionary containing train and test data as Polars DataFrames
         """
         # File paths
         data_dir = self.data_dir / "UCR" / dataset_name
@@ -332,7 +346,17 @@ class TimeSeriesDataLoader:
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                import pickle
+                with open(cache_file, 'rb') as f:
+                    result = pickle.load(f)
+                
+                # Convert pandas DataFrames to polars if needed
+                if 'train' in result and not isinstance(result['train'], pl.DataFrame):
+                    result['train'] = pl.from_pandas(result['train'])
+                if 'test' in result and not isinstance(result['test'], pl.DataFrame):
+                    result['test'] = pl.from_pandas(result['test'])
+                
+                return result
             except Exception as e:
                 print(f"Error loading from cache: {e}. Processing raw data.")
         
@@ -357,9 +381,9 @@ class TimeSeriesDataLoader:
                     print(f"Error downloading {file_type} data: {e}")
                     raise
         
-        # Parse ARFF files
-        train_data = self._parse_arff(data_dir / f"{dataset_name}_train.arff")
-        test_data = self._parse_arff(data_dir / f"{dataset_name}_test.arff")
+        # Parse ARFF files to Polars DataFrames
+        train_data = self._parse_arff_to_polars(data_dir / f"{dataset_name}_train.arff")
+        test_data = self._parse_arff_to_polars(data_dir / f"{dataset_name}_test.arff")
         
         result = {
             'train': train_data,
@@ -368,19 +392,21 @@ class TimeSeriesDataLoader:
         }
         
         # Save to cache
-        pd.to_pickle(result, cache_file)
+        import pickle
+        with open(cache_file, 'wb') as f:
+            pickle.dump(result, f)
         
         return result
 
-    def _parse_arff(self, file_path: Union[str, Path]) -> pd.DataFrame:
+    def _parse_arff_to_polars(self, file_path: Union[str, Path]) -> pl.DataFrame:
         """
-        Parse an ARFF file into a pandas DataFrame.
+        Parse an ARFF file into a Polars DataFrame.
         
         Args:
             file_path: Path to the ARFF file
             
         Returns:
-            DataFrame with the data
+            Polars DataFrame with the data
         """
         data = []
         attributes = []
@@ -421,12 +447,21 @@ class TimeSeriesDataLoader:
                     
                     data.append(processed_values)
         
-        # Create DataFrame
-        df = pd.DataFrame(data, columns=attributes)
+        # Create Polars DataFrame
+        # Convert data to dict of columns
+        if not data:
+            return pl.DataFrame()
         
-        return df
+        columns = {attr: [] for attr in attributes}
+        for row in data:
+            for i, val in enumerate(row):
+                if i < len(attributes):
+                    columns[attributes[i]].append(val)
+        
+        # Create DataFrame with appropriate types
+        return pl.DataFrame(columns)
 
-    def load_physionet_dataset(self, dataset_id: str, force_download: bool = False) -> pd.DataFrame:
+    def load_physionet_dataset(self, dataset_id: str, force_download: bool = False) -> pl.DataFrame:
         """
         Load a dataset from PhysioNet.
         
@@ -435,16 +470,16 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the file exists locally
             
         Returns:
-            DataFrame with the data
+            Polars DataFrame with the data
         """
         # File paths
         data_dir = self.data_dir / "PhysioNet" / dataset_id
-        cache_file = self.cache_dir / f"physionet_{dataset_id}.pkl"
+        cache_file = self.cache_dir / f"physionet_{dataset_id}.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Processing raw data.")
         
@@ -457,11 +492,11 @@ class TimeSeriesDataLoader:
             raise ValueError(f"Dataset {dataset_id} not implemented yet")
         
         # Save to cache
-        pd.to_pickle(df, cache_file)
+        df.write_parquet(cache_file)
         
         return df
 
-    def _load_physionet_challenge_2012(self, data_dir: Path, force_download: bool) -> pd.DataFrame:
+    def _load_physionet_challenge_2012(self, data_dir: Path, force_download: bool) -> pl.DataFrame:
         """
         Load the PhysioNet Challenge 2012 dataset (Mortality prediction).
         
@@ -470,7 +505,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the files exist locally
             
         Returns:
-            DataFrame with the data
+            Polars DataFrame with the data
         """
         data_dir.mkdir(parents=True, exist_ok=True)
         
@@ -485,10 +520,10 @@ class TimeSeriesDataLoader:
             urllib.request.urlretrieve(outcome_url, outcome_file)
         
         # Read outcome data
-        outcome_df = pd.read_csv(outcome_file, sep=',')
+        outcome_df = pl.read_csv(outcome_file)
         
         # For simplicity, just download a few example records
-        sample_records = outcome_df['RecordID'].iloc[:10].tolist()
+        sample_records = outcome_df.select('RecordID').head(10).to_series().to_list()
         
         all_dfs = []
         
@@ -507,23 +542,28 @@ class TimeSeriesDataLoader:
             
             # Read record data
             try:
-                record_df = pd.read_csv(record_file, sep=',')
-                record_df['RecordID'] = record_id
+                record_df = pl.read_csv(record_file)
+                
+                # Add record ID
+                record_df = record_df.with_columns(pl.lit(record_id).alias('RecordID'))
                 
                 # Get outcome
-                in_hospital_death = outcome_df.loc[outcome_df['RecordID'] == record_id, 'In-hospital_death'].values[0]
-                record_df['In-hospital_death'] = in_hospital_death
+                in_hospital_death = outcome_df.filter(pl.col('RecordID') == record_id).select('In-hospital_death').item()
+                record_df = record_df.with_columns(pl.lit(in_hospital_death).alias('In-hospital_death'))
                 
                 all_dfs.append(record_df)
             except Exception as e:
                 print(f"Error processing record {record_id}: {e}")
         
         # Combine all records
-        combined_df = pd.concat(all_dfs, ignore_index=True)
+        if not all_dfs:
+            return pl.DataFrame()
+        
+        combined_df = pl.concat(all_dfs)
         
         return combined_df
 
-    def _load_physionet_mitdb(self, data_dir: Path, force_download: bool) -> pd.DataFrame:
+    def _load_physionet_mitdb(self, data_dir: Path, force_download: bool) -> pl.DataFrame:
         """
         Load the MIT-BIH Arrhythmia Database.
         
@@ -532,7 +572,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the files exist locally
             
         Returns:
-            DataFrame with the data
+            Polars DataFrame with the data
         """
         # This is a placeholder for now - loading ECG data requires specialized libraries
         # like wfdb which we might want to add as a dependency later
@@ -567,7 +607,7 @@ class TimeSeriesDataLoader:
             print(f"Error getting UCR dataset list: {e}")
             return []
 
-    def get_kaggle_dataset(self, dataset_name: str, force_download: bool = False) -> pd.DataFrame:
+    def get_kaggle_dataset(self, dataset_name: str, force_download: bool = False) -> pl.DataFrame:
         """
         Load a dataset from Kaggle.
         
@@ -579,7 +619,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the file exists locally
             
         Returns:
-            DataFrame with the data
+            Polars DataFrame with the data
         """
         try:
             from kaggle.api.kaggle_api_extended import KaggleApi
@@ -592,12 +632,12 @@ class TimeSeriesDataLoader:
             raise Exception(f"Error authenticating with Kaggle API: {e}. Make sure you have set up your API credentials.")
         
         # Cache file path
-        cache_file = self.cache_dir / f"kaggle_{dataset_name.replace('/', '_')}.pkl"
+        cache_file = self.cache_dir / f"kaggle_{dataset_name.replace('/', '_')}.parquet"
         
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                return pl.read_parquet(cache_file)
             except Exception as e:
                 print(f"Error loading from cache: {e}. Downloading fresh data.")
         
@@ -616,14 +656,14 @@ class TimeSeriesDataLoader:
             raise FileNotFoundError(f"No CSV files found in dataset {dataset_name}")
         
         # Load the first CSV file
-        df = pd.read_csv(csv_files[0])
+        df = pl.read_csv(csv_files[0])
         
         # Save to cache
-        pd.to_pickle(df, cache_file)
+        df.write_parquet(cache_file)
         
         return df
 
-    def load_nasa_cmapss(self, force_download: bool = False) -> Dict[str, pd.DataFrame]:
+    def load_nasa_cmapss(self, force_download: bool = False) -> Dict[str, pl.DataFrame]:
         """
         Load the NASA C-MAPSS Turbofan Engine Degradation Simulation Dataset.
         
@@ -631,7 +671,7 @@ class TimeSeriesDataLoader:
             force_download: If True, download even if the file exists locally
             
         Returns:
-            Dictionary of DataFrames with the data
+            Dictionary of Polars DataFrames with the data
         """
         # File paths
         data_dir = self.data_dir / "NASA_CMAPSS"
@@ -640,7 +680,17 @@ class TimeSeriesDataLoader:
         # If cache exists and we're not forcing a download, load from cache
         if cache_file.exists() and not force_download:
             try:
-                return pd.read_pickle(cache_file)
+                import pickle
+                with open(cache_file, 'rb') as f:
+                    result = pickle.load(f)
+                
+                # Convert pandas DataFrames to polars if needed
+                for fd in result:
+                    for data_type in result[fd]:
+                        if not isinstance(result[fd][data_type], pl.DataFrame):
+                            result[fd][data_type] = pl.from_pandas(result[fd][data_type])
+                
+                return result
             except Exception as e:
                 print(f"Error loading from cache: {e}. Processing raw data.")
         
@@ -674,21 +724,27 @@ class TimeSeriesDataLoader:
         for fd in range(1, 5):
             # Load training data
             train_file = data_dir / f"train_FD00{fd}.txt"
-            train_df = pd.read_csv(train_file, sep=' ', header=None, names=train_cols)
-            train_df = train_df.drop(train_df.columns[-1], axis=1)  # Drop the empty column
+            train_df = pl.read_csv(train_file, separator=' ', has_header=False, new_columns=train_cols)
+            # Drop the last column which is empty due to the trailing space
+            train_df = train_df.select(train_df.columns[:-1])
             
             # Load test data
             test_file = data_dir / f"test_FD00{fd}.txt"
-            test_df = pd.read_csv(test_file, sep=' ', header=None, names=test_cols)
-            test_df = test_df.drop(test_df.columns[-1], axis=1)  # Drop the empty column
+            test_df = pl.read_csv(test_file, separator=' ', has_header=False, new_columns=test_cols)
+            # Drop the last column
+            test_df = test_df.select(test_df.columns[:-1])
             
             # Load RUL (Remaining Useful Life) data
             rul_file = data_dir / f"RUL_FD00{fd}.txt"
-            rul_df = pd.read_csv(rul_file, sep=' ', header=None, names=rul_cols)
-            rul_df = rul_df.drop(rul_df.columns[-1], axis=1)  # Drop the empty column
+            rul_df = pl.read_csv(rul_file, separator=' ', has_header=False, new_columns=rul_cols)
+            # Drop the last column
+            rul_df = rul_df.select(rul_df.columns[:-1])
             
             # Add RUL to training data
-            train_df['rul'] = train_df.groupby('unit_number')['time_cycles'].transform(max) - train_df['time_cycles']
+            # Group by unit_number, find max time_cycles, then calculate RUL
+            max_cycles = train_df.group_by('unit_number').agg(pl.max('time_cycles').alias('max_cycles'))
+            train_df = train_df.join(max_cycles, on='unit_number')
+            train_df = train_df.with_columns((pl.col('max_cycles') - pl.col('time_cycles')).alias('rul')).drop('max_cycles')
             
             # Store the data
             result[f'FD00{fd}'] = {
@@ -698,14 +754,16 @@ class TimeSeriesDataLoader:
             }
         
         # Save to cache
-        pd.to_pickle(result, cache_file)
+        import pickle
+        with open(cache_file, 'wb') as f:
+            pickle.dump(result, f)
         
         return result
 
 
 def get_yahoo_data(symbol: str, 
                   start_date: Union[str, datetime], 
-                  end_date: Optional[Union[str, datetime]] = None) -> pd.DataFrame:
+                  end_date: Optional[Union[str, datetime]] = None) -> pl.DataFrame:
     """
     Convenience function to load Yahoo Finance data.
     
@@ -715,7 +773,7 @@ def get_yahoo_data(symbol: str,
         end_date: End date for data retrieval (defaults to today)
         
     Returns:
-        DataFrame with OHLCV data
+        Polars DataFrame with OHLCV data
     """
     loader = TimeSeriesDataLoader()
     return loader.get_yahoo_data(symbol, start_date, end_date)

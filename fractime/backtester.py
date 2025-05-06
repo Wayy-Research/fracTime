@@ -1,19 +1,19 @@
 """
-Time Series Backtesting Framework for FracTime
+Time Series Backtesting Framework for FracTime using Polars
 
 This module provides a comprehensive backtesting framework for evaluating
-and comparing different time series forecasting methods.
+and comparing different time series forecasting methods, optimized with Polars
+for high-performance data manipulation.
 """
 
+import polars as pl
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Dict, List, Callable, Union, Optional, Any, Tuple
-from sklearn.base import clone
-from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
 import time
 import logging
 from datetime import datetime
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
 
 # Configure logging
 logging.basicConfig(
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class TimeSeriesBacktester:
     """
-    A framework for backtesting time series forecasting models.
+    A framework for backtesting time series forecasting models using Polars.
     
     This class allows for systematic evaluation of multiple forecasting models
     using various backtesting strategies such as expanding window, sliding window,
@@ -82,7 +82,7 @@ class TimeSeriesBacktester:
         """
         self.metrics[name] = metric_func
         
-    def run_backtest(self, data: pd.DataFrame, target_col: str, 
+    def run_backtest(self, data: pl.DataFrame, target_col: str, 
                      feature_cols: Optional[List[str]] = None,
                      window_size: Optional[int] = None, step_size: int = 1, 
                      train_size: float = 0.7, expanding_window: bool = False,
@@ -93,7 +93,7 @@ class TimeSeriesBacktester:
         Run the backtest with expanding or sliding window.
         
         Args:
-            data: Time series data
+            data: Time series data as a Polars DataFrame
             target_col: Column name of the target variable
             feature_cols: List of feature column names. If None, all columns except target_col are used
             window_size: Size of the sliding window. If None, a single train-test split is used
@@ -112,7 +112,7 @@ class TimeSeriesBacktester:
         self.forecast_horizon = forecast_horizon
         
         if feature_cols is None:
-            feature_cols = [col for col in data.columns if col != target_col and col != date_col]
+            feature_cols = [col for col in data.columns if col != target_col and (date_col is None or col != date_col)]
         
         self.results = {model_name: {metric: [] for metric in self.metrics} 
                         for model_name in self.models}
@@ -120,28 +120,22 @@ class TimeSeriesBacktester:
         self.forecasts = {model_name: [] for model_name in self.models}
         self.actuals = []
         
-        # Create date index if date_col is provided
-        if date_col is not None and date_col in data.columns:
-            date_index = pd.DatetimeIndex(data[date_col])
-        else:
-            date_index = None
-        
         if window_size is None:
             # Single train-test split
             self._run_single_split(data, target_col, feature_cols, train_size, 
-                                  forecast_horizon, recursive_forecast, date_index)
+                                  forecast_horizon, recursive_forecast)
         else:
             # Multiple window evaluation
             self._run_window_evaluation(data, target_col, feature_cols, window_size, 
                                        step_size, expanding_window, forecast_horizon, 
-                                       recursive_forecast, date_index)
+                                       recursive_forecast, date_col)
         
         # Calculate average metrics across all windows
         self._calculate_average_metrics()
                 
         return self.results
     
-    def _validate_data(self, data: pd.DataFrame, target_col: str, 
+    def _validate_data(self, data: pl.DataFrame, target_col: str, 
                       feature_cols: Optional[List[str]]) -> None:
         """
         Validate the input data for the backtest.
@@ -154,8 +148,8 @@ class TimeSeriesBacktester:
         Raises:
             ValueError: If validation fails
         """
-        if not isinstance(data, pd.DataFrame):
-            raise ValueError("Data must be a pandas DataFrame")
+        if not isinstance(data, pl.DataFrame):
+            raise ValueError("Data must be a Polars DataFrame")
             
         if target_col not in data.columns:
             raise ValueError(f"Target column '{target_col}' not found in data")
@@ -165,13 +159,12 @@ class TimeSeriesBacktester:
             if missing_cols:
                 raise ValueError(f"Feature columns {missing_cols} not found in data")
         
-        if data.isnull().values.any():
-            logger.warning("Data contains NaN values, which may cause issues with some models")
+        if data.null_count().sum() > 0:
+            logger.warning("Data contains null values, which may cause issues with some models")
     
-    def _run_single_split(self, data: pd.DataFrame, target_col: str, 
+    def _run_single_split(self, data: pl.DataFrame, target_col: str, 
                          feature_cols: List[str], train_size: float,
-                         forecast_horizon: int, recursive_forecast: bool,
-                         date_index: Optional[pd.DatetimeIndex]) -> None:
+                         forecast_horizon: int, recursive_forecast: bool) -> None:
         """
         Run a single train-test split backtest.
         
@@ -182,35 +175,44 @@ class TimeSeriesBacktester:
             train_size: Proportion of data to use for training
             forecast_horizon: Number of steps to forecast ahead
             recursive_forecast: If True, use recursive forecasting for multi-step ahead
-            date_index: Optional date index for time-based splitting
         """
         # Determine split index
-        train_idx = int(len(data) * train_size)
+        n_rows = data.height
+        train_idx = int(n_rows * train_size)
         
         # Split the data
-        train_data = data.iloc[:train_idx]
-        test_data = data.iloc[train_idx:]
+        train_data = data.slice(0, train_idx)
+        test_data = data.slice(train_idx, n_rows - train_idx)
         
-        X_train = train_data[feature_cols]
-        y_train = train_data[target_col]
+        # Prepare training data
+        X_train = train_data.select(feature_cols)
+        y_train = train_data.select(target_col).to_numpy().flatten()
         
-        # For multi-step forecasting, we need a different approach
+        # For multi-step forecasting
         if forecast_horizon > 1:
-            self._evaluate_models_multistep(X_train, y_train, test_data, feature_cols, 
-                                          target_col, forecast_horizon, recursive_forecast)
-            self.actuals = test_data[target_col].values[:forecast_horizon]
+            # Ensure test data has enough rows for the forecast horizon
+            if test_data.height < forecast_horizon:
+                logger.warning(f"Test data has fewer rows ({test_data.height}) than forecast horizon ({forecast_horizon})")
+                test_data_subset = test_data
+            else:
+                test_data_subset = test_data.slice(0, forecast_horizon)
+                
+            self._evaluate_models_multistep(X_train, y_train, test_data_subset, feature_cols, 
+                                         target_col, forecast_horizon, recursive_forecast)
+            self.actuals = test_data_subset.select(target_col).to_numpy().flatten()
         else:
-            X_test = test_data[feature_cols]
-            y_test = test_data[target_col]
+            # Single-step forecasting
+            X_test = test_data.select(feature_cols)
+            y_test = test_data.select(target_col).to_numpy().flatten()
             
             self._evaluate_models(X_train, y_train, X_test, y_test)
-            self.actuals = y_test.values
+            self.actuals = y_test
     
-    def _run_window_evaluation(self, data: pd.DataFrame, target_col: str, 
+    def _run_window_evaluation(self, data: pl.DataFrame, target_col: str, 
                               feature_cols: List[str], window_size: int, 
                               step_size: int, expanding_window: bool,
                               forecast_horizon: int, recursive_forecast: bool,
-                              date_index: Optional[pd.DatetimeIndex]) -> None:
+                              date_col: Optional[str]) -> None:
         """
         Run a window-based backtest (expanding or sliding).
         
@@ -223,62 +225,74 @@ class TimeSeriesBacktester:
             expanding_window: If True, use expanding window, else use sliding window
             forecast_horizon: Number of steps to forecast ahead
             recursive_forecast: If True, use recursive forecasting for multi-step ahead
-            date_index: Optional date index for time-based splitting
+            date_col: Optional column name containing dates for time-based splitting
         """
+        n_rows = data.height
+        
         # Ensure window size is reasonable
-        if window_size >= len(data):
-            raise ValueError(f"Window size ({window_size}) must be less than data length ({len(data)})")
+        if window_size >= n_rows:
+            raise ValueError(f"Window size ({window_size}) must be less than data length ({n_rows})")
         
         # For each window
-        for i in range(0, len(data) - window_size - forecast_horizon + 1, step_size):
+        for i in range(0, n_rows - window_size - forecast_horizon + 1, step_size):
             end_idx = i + window_size
             
             if expanding_window:
                 # Expanding window: train data grows
-                train_data = data.iloc[:end_idx]
+                train_data = data.slice(0, end_idx)
             else:
                 # Sliding window: fixed size train data
-                train_data = data.iloc[i:end_idx]
+                train_data = data.slice(i, end_idx - i)
                 
             test_idx = end_idx
             
-            X_train = train_data[feature_cols]
-            y_train = train_data[target_col]
+            # Prepare training data
+            X_train = train_data.select(feature_cols)
+            y_train = train_data.select(target_col).to_numpy().flatten()
             
             # For multi-step forecasting
             if forecast_horizon > 1:
-                test_data = data.iloc[test_idx:test_idx+forecast_horizon]
-                if len(test_data) < forecast_horizon:
-                    continue
-                
-                # Evaluate models on this window
-                self._evaluate_models_multistep(X_train, y_train, test_data, feature_cols, 
-                                             target_col, forecast_horizon, recursive_forecast)
-                self.actuals.extend(test_data[target_col].values)
+                # Get test data for the forecast horizon
+                if test_idx + forecast_horizon <= n_rows:
+                    test_data = data.slice(test_idx, forecast_horizon)
+                    
+                    # Evaluate models on this window
+                    self._evaluate_models_multistep(X_train, y_train, test_data, feature_cols, 
+                                                target_col, forecast_horizon, recursive_forecast)
+                    
+                    # Store actual values
+                    y_test = test_data.select(target_col).to_numpy().flatten()
+                    self.actuals.extend(y_test)
             else:
                 # Single-step forecasting
-                test_data = data.iloc[test_idx:test_idx+1]
-                if len(test_data) == 0:
-                    continue
+                if test_idx < n_rows:
+                    test_data = data.slice(test_idx, 1)
                     
-                X_test = test_data[feature_cols]
-                y_test = test_data[target_col]
-                
-                # Evaluate models on this window
-                self._evaluate_models(X_train, y_train, X_test, y_test)
-                self.actuals.extend(y_test.values)
+                    # Prepare test data
+                    X_test = test_data.select(feature_cols)
+                    y_test = test_data.select(target_col).to_numpy().flatten()
+                    
+                    # Evaluate models on this window
+                    self._evaluate_models(X_train, y_train, X_test, y_test)
+                    
+                    # Store actual values
+                    self.actuals.extend(y_test)
     
-    def _evaluate_models(self, X_train: pd.DataFrame, y_train: pd.Series, 
-                        X_test: pd.DataFrame, y_test: pd.Series) -> None:
+    def _evaluate_models(self, X_train: pl.DataFrame, y_train: np.ndarray, 
+                        X_test: pl.DataFrame, y_test: np.ndarray) -> None:
         """
         Evaluate all models on the current window for single-step forecasting.
         
         Args:
-            X_train: Training features
-            y_train: Training target
-            X_test: Test features
-            y_test: Test target
+            X_train: Training features as Polars DataFrame
+            y_train: Training target as numpy array
+            X_test: Test features as Polars DataFrame
+            y_test: Test target as numpy array
         """
+        # Convert Polars DataFrames to numpy for sklearn models
+        X_train_np = X_train.to_numpy()
+        X_test_np = X_test.to_numpy()
+        
         for model_name, model in self.models.items():
             try:
                 # Time the execution
@@ -286,16 +300,17 @@ class TimeSeriesBacktester:
                 
                 # Clone the model to avoid data leakage if possible
                 try:
+                    from sklearn.base import clone
                     m = clone(model)
                 except:
                     # If model can't be cloned, use it directly
                     m = model
                 
                 # Fit the model
-                m.fit(X_train, y_train)
+                m.fit(X_train_np, y_train)
                 
                 # Make predictions
-                y_pred = m.predict(X_test)
+                y_pred = m.predict(X_test_np)
                 
                 # Record execution time
                 execution_time = time.time() - start_time
@@ -319,22 +334,26 @@ class TimeSeriesBacktester:
                     self.results[model_name][metric_name].append(np.nan)
                 self.execution_times[model_name].append(np.nan)
     
-    def _evaluate_models_multistep(self, X_train: pd.DataFrame, y_train: pd.Series, 
-                                  test_data: pd.DataFrame, feature_cols: List[str], 
+    def _evaluate_models_multistep(self, X_train: pl.DataFrame, y_train: np.ndarray, 
+                                  test_data: pl.DataFrame, feature_cols: List[str], 
                                   target_col: str, forecast_horizon: int, 
                                   recursive_forecast: bool) -> None:
         """
         Evaluate all models on the current window for multi-step forecasting.
         
         Args:
-            X_train: Training features
-            y_train: Training target
-            test_data: Test data including features and target
+            X_train: Training features as Polars DataFrame
+            y_train: Training target as numpy array
+            test_data: Test data as Polars DataFrame
             feature_cols: List of feature column names
             target_col: Column name of the target variable
             forecast_horizon: Number of steps to forecast ahead
             recursive_forecast: If True, use recursive forecasting
         """
+        # Convert Polars DataFrames to numpy for sklearn models
+        X_train_np = X_train.to_numpy()
+        y_test = test_data.select(target_col).to_numpy().flatten()
+        
         for model_name, model in self.models.items():
             try:
                 # Time the execution
@@ -342,62 +361,81 @@ class TimeSeriesBacktester:
                 
                 # Clone the model if possible
                 try:
+                    from sklearn.base import clone
                     m = clone(model)
                 except:
                     m = model
                 
                 # Fit the model
-                m.fit(X_train, y_train)
+                m.fit(X_train_np, y_train)
                 
                 # Direct multi-step forecasting (if the model supports it)
                 if hasattr(m, 'predict_many') and not recursive_forecast:
-                    y_pred = m.predict_many(X_train.iloc[-1:], forecast_horizon)
+                    # Use the model's built-in multi-step forecasting
+                    last_input = X_train.tail(1).to_numpy()
+                    y_pred = m.predict_many(last_input, forecast_horizon)
+                    
                 # Recursive forecasting
                 elif recursive_forecast:
                     # Initialize with the last training point
-                    current_features = X_train.iloc[-1:].copy()
+                    current_features = X_train.tail(1)
                     y_pred = []
+                    
+                    # Convert to dict for easier updates
+                    current_features_dict = {col: current_features[col][0] for col in feature_cols}
                     
                     # Recursively predict each step
                     for h in range(forecast_horizon):
+                        # Convert current features to numpy for prediction
+                        current_features_np = np.array([[current_features_dict[col] for col in feature_cols]])
+                        
                         # Make single-step prediction
-                        pred = m.predict(current_features)
-                        y_pred.append(pred[0])
+                        step_pred = m.predict(current_features_np)
+                        y_pred.append(step_pred[0])
                         
                         # Update features for next step prediction
                         # This requires knowledge of how features are created
-                        # Here we make a simple assumption: shift the target 
-                        # and keep other features the same
-                        for i, col in enumerate(feature_cols):
-                            if col.startswith('lag_') or col == target_col:
+                        for col in feature_cols:
+                            if col.startswith('lag_'):
                                 # Shift the lagged features
-                                lag = int(col.replace('lag_', '')) if col.startswith('lag_') else 1
+                                lag = int(col.replace('lag_', ''))
                                 if lag > 1:
-                                    # Update older lags
-                                    current_features[col] = test_data.iloc[h:h+1][f'lag_{lag-1}'].values
+                                    # Update older lags - try to find the appropriate lag column
+                                    prev_lag_col = f'lag_{lag-1}'
+                                    if prev_lag_col in feature_cols:
+                                        current_features_dict[col] = current_features_dict[prev_lag_col]
+                                    elif h < test_data.height:
+                                        # If we can't find a previous lag, try to use test data
+                                        current_features_dict[col] = test_data[prev_lag_col][h]
                                 else:
-                                    # Update most recent lag with prediction
-                                    current_features[col] = pred[0]
+                                    # Update lag_1 with prediction
+                                    current_features_dict[col] = step_pred[0]
+                            elif col == target_col:
+                                # Update target with prediction
+                                current_features_dict[col] = step_pred[0]
+                
                 else:
                     # Model doesn't support multi-step and we're not using recursive
                     # Just make direct predictions for each horizon
                     y_pred = []
                     for h in range(forecast_horizon):
                         # Use the appropriate row of test data for this horizon
-                        if h < len(test_data):
-                            test_features = test_data.iloc[h:h+1][feature_cols]
-                            pred = m.predict(test_features)
-                            y_pred.append(pred[0])
+                        if h < test_data.height:
+                            test_features = test_data.slice(h, 1).select(feature_cols).to_numpy()
+                            step_pred = m.predict(test_features)
+                            y_pred.append(step_pred[0])
+                        else:
+                            # If we've run out of test data, pad with NaN
+                            y_pred.append(np.nan)
                 
                 # Record execution time
                 execution_time = time.time() - start_time
                 self.execution_times[model_name].append(execution_time)
                 
                 # Store the predictions
-                self.forecasts[model_name].extend(y_pred if isinstance(y_pred, list) else y_pred.tolist())
+                self.forecasts[model_name].extend(y_pred)
                 
-                # Calculate and store metrics
-                y_test = test_data[target_col].values[:forecast_horizon]
+                # Make sure predictions and actuals have the same length
                 if len(y_pred) < len(y_test):
                     # If we didn't generate enough predictions, pad with NaN
                     y_pred = np.append(y_pred, [np.nan] * (len(y_test) - len(y_pred)))
@@ -405,13 +443,20 @@ class TimeSeriesBacktester:
                     # If we generated too many predictions, truncate
                     y_pred = y_pred[:len(y_test)]
                 
+                # Calculate and store metrics
                 for metric_name, metric_func in self.metrics.items():
                     try:
-                        score = metric_func(y_test, y_pred)
-                        self.results[model_name][metric_name].append(score)
+                        # Filter out NaN values for metric calculation
+                        valid_indices = ~np.isnan(y_pred)
+                        if np.any(valid_indices):
+                            score = metric_func(y_test[valid_indices], np.array(y_pred)[valid_indices])
+                            self.results[model_name][metric_name].append(score)
+                        else:
+                            self.results[model_name][metric_name].append(np.nan)
                     except Exception as e:
                         logger.warning(f"Error calculating {metric_name} for {model_name}: {e}")
                         self.results[model_name][metric_name].append(np.nan)
+                        
             except Exception as e:
                 logger.error(f"Error with model {model_name}: {e}")
                 # Add NaN values for metrics to maintain structure
