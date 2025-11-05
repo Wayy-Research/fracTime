@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "fractime"
 version = "0.1.0"
-description = "Advanced time series forecasting using fractal geometry and chaos theory"
+description = "Python library for advanced time series forecasting using fractal geometry and chaos theory"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
     { name = "Your Name", email = "your.email@example.com" }
 ]
-keywords = ["finance", "forecasting", "fractals", "time-series"]
+keywords = ["finance", "forecasting", "fractals", "time-series", "quantitative-finance", "chaos-theory"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -36,6 +36,19 @@ dependencies = [
     "scipy>=1.15.2",
     "statsmodels>=0.14.4",
     "yfinance>=0.2.54",
+    # Data sources
+    "alpha-vantage>=2.3.0",
+    "pycoingecko>=3.1.0",
+    "python-binance>=1.0.0",
+    "fredapi>=0.5.0",
+    "wbgapi>=1.0.0",
+    "pandasdmx>=1.9.0",
+    "twelvedata>=1.2.0",
+    "finnhub-python>=2.4.0",
+    "tiingo>=0.14.0",
+    "krakenex>=2.1.0",
+    "ecbdata>=0.1.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

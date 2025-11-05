@@ -9,7 +9,7 @@ uv pip install -e .
 uv pip install -e ".[dev]"
 
 # Run tests
-pytest                         # Run all tests  
+pytest                         # Run all tests
 pytest tests/test_core.py      # Run tests in specific file
 pytest tests/test_core.py::test_sample_data  # Run specific test
 
@@ -18,8 +18,8 @@ black fractime/ tests/         # Format code
 ruff check fractime/ tests/    # Lint code
 mypy fractime/                 # Type checking
 
-# Run application
-streamlit run app.py           # Start web application
+# Run examples
+python examples/forecasting_comparison.py --ticker ^GSPC --window-size 60
 ```
 
 ## Code Style
