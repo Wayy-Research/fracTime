@@ -1,6 +1,6 @@
 # FracTime
 
-**FracTime** is a Python library for advanced time series forecasting that leverages fractal geometry and chaos theory principles for market analysis and prediction.
+**FracTime** is a Python library for advanced time series forecasting that leverages fractal geometry and chaos theory principles to analyze and predict complex temporal patterns in any time series data.
 
 This is a core library designed to be integrated into your own applications—whether you're building web dashboards, trading systems, research tools, or data pipelines.
 
@@ -33,14 +33,15 @@ This is a core library designed to be integrated into your own applications—wh
 
 ## Introduction
 
-FracTime brings together cutting-edge concepts from fractal geometry, chaos theory, and quantitative finance to provide a comprehensive toolkit for time series analysis and forecasting. Unlike traditional methods that assume normal distributions and market efficiency, FracTime embraces the fractal nature of financial markets as described by Benoit Mandelbrot.
+FracTime brings together cutting-edge concepts from fractal geometry, chaos theory, and advanced statistical methods to provide a comprehensive toolkit for time series analysis and forecasting. Unlike traditional methods that assume normal distributions and independence, FracTime embraces the fractal nature of time series data—recognizing long-term memory, self-similarity, and regime-dependent behavior—as described by Benoit Mandelbrot.
 
 **Why FracTime?**
 
-- **Fractal-Based**: Captures market memory and self-similarity across time scales
-- **Multiple Forecasting Methods**: Compare statistical, fractal, and ML approaches
-- **Comprehensive Backtesting**: Robust framework for evaluating forecast accuracy
-- **Flexible Data Sources**: Built-in support for Yahoo Finance, Alpha Vantage, crypto exchanges, and economic data
+- **Fractal-Based Forecasting**: Captures long-term memory and self-similarity across time scales that traditional methods miss
+- **Probability-Weighted Scenarios**: Generate multiple future paths with likelihood scores, not just point estimates
+- **Unique Forecasting Methods**: State-transition FRSR, pattern projection, regime-switching models unavailable in standard libraries
+- **Comprehensive Backtesting**: Robust walk-forward framework for evaluating forecast accuracy
+- **Flexible Data Integration**: Works with [wrdata](https://github.com/Wayy-Research/wrdata) for unified time series data access
 - **Production-Ready**: Numba-optimized performance for real-world applications
 
 ---
@@ -118,10 +119,11 @@ Here's a minimal example to get you started:
 
 ```python
 import fractime as ft
+import wrdata as wr
 import numpy as np
 
-# Load market data
-data = ft.get_yahoo_data("^GSPC", "2020-01-01", "2024-01-01")
+# Load time series data (stock prices in this example)
+data = wr.get("^GSPC", start="2020-01-01", source="yahoo")
 prices = data['Close'].values
 
 # Analyze fractal properties
@@ -133,35 +135,78 @@ print(f"Hurst Exponent: {hurst:.3f}")
 print(f"Fractal Dimension: {fractal_dim:.3f}")
 
 if hurst > 0.5:
-    print("Market shows trending behavior (persistent)")
+    print("Series shows trending behavior (persistent)")
 elif hurst < 0.5:
-    print("Market shows mean-reverting behavior (anti-persistent)")
+    print("Series shows mean-reverting behavior (anti-persistent)")
 else:
-    print("Market shows random walk behavior")
+    print("Series shows random walk behavior")
 
-# Simulate future paths
-simulator = ft.FractalSimulator()
-paths = simulator.simulate_paths(
-    initial_price=prices[-1],
+# Initialize simulator with historical data
+simulator = ft.FractalSimulator(prices)
+
+# Generate probability-weighted forecast paths
+paths, metadata = simulator.simulate_paths(
     n_steps=30,      # Forecast 30 days ahead
     n_paths=1000,    # Generate 1000 scenarios
-    dt=1/252,        # Daily time step
-    hurst=hurst      # Use calculated Hurst exponent
+    n_clusters=5     # Group into 5 scenario clusters
 )
 
-# Analyze simulated paths
-path_analyzer = ft.PathAnalyzer()
-stats = path_analyzer.calculate_statistics(paths)
+# Analyze probability-weighted scenarios
+print(f"\nScenario Cluster Probabilities:")
+for i, prob in enumerate(metadata['cluster_probs']):
+    cluster_paths = paths[metadata['labels'] == i]
+    mean_outcome = np.mean(cluster_paths[:, -1])
+    print(f"  Scenario {i+1}: {prob:.1%} probability, outcome ${mean_outcome:.2f}")
 
-print(f"\n30-Day Forecast Statistics:")
-print(f"Expected Price: ${stats['mean']:.2f}")
-print(f"95% Confidence Interval: ${stats['ci_lower']:.2f} - ${stats['ci_upper']:.2f}")
-print(f"Downside Risk (5th percentile): ${stats['percentile_5']:.2f}")
+# Most likely outcome
+most_likely_path = metadata['most_likely_path']
+print(f"\nMost Likely Forecast: ${most_likely_path[-1]:.2f}")
 
-# Visualize results
+# High-probability path envelope
+high_prob_paths = metadata['probability_cloud']
+median_forecast = np.median(high_prob_paths[:, -1])
+ci_lower = np.percentile(high_prob_paths[:, -1], 2.5)
+ci_upper = np.percentile(high_prob_paths[:, -1], 97.5)
+
+print(f"High-Probability Forecast Range:")
+print(f"  Median: ${median_forecast:.2f}")
+print(f"  95% CI: ${ci_lower:.2f} - ${ci_upper:.2f}")
+
+# Visualize probability-weighted forecasts
 visualizer = ft.FractalVisualizer()
-fig = visualizer.plot_simulation_results(paths, data, stats)
+fig = visualizer.plot_simulation_results(paths, metadata)
 fig.show()
+```
+
+### Quick Start: Forecasting Focus
+
+```python
+import fractime as ft
+import wrdata as wr
+
+# Load your time series
+data = wr.get("AAPL", start="2020-01-01", source="yahoo")
+prices = data['Close'].values
+
+# Compare traditional vs fractal forecasting
+from fractime.forecasting import ARIMAForecaster, StateTransitionFRSRForecaster
+
+# Traditional ARIMA (baseline)
+arima = ARIMAForecaster(p=1, d=1, q=1)
+arima.fit(prices)
+arima_forecast = arima.predict(horizon=30)
+
+# FracTime's fractal regime-switching forecaster
+frsr = StateTransitionFRSRForecaster(n_patterns=10, n_regimes=3)
+frsr.fit(prices)
+frsr_forecast, regime_probs = frsr.predict(horizon=30, return_regimes=True)
+
+print(f"Current price: ${prices[-1]:.2f}")
+print(f"\n30-day forecasts:")
+print(f"  ARIMA (traditional): ${arima_forecast[-1]:.2f}")
+print(f"  ST-FRSR (fractal):   ${frsr_forecast[-1]:.2f}")
+print(f"\nCurrent regime probabilities:")
+print(f"  Bull: {regime_probs[0]:.1%}, Neutral: {regime_probs[1]:.1%}, Bear: {regime_probs[2]:.1%}")
 ```
 
 ---
@@ -170,46 +215,58 @@ fig.show()
 
 ### Data Loading
 
-FracTime provides multiple data sources through a unified interface:
+FracTime is designed to work with any time series data. For financial and economic data, we recommend using **[wrdata](https://github.com/Wayy-Research/wrdata)** for unified data access across multiple sources.
 
-#### Yahoo Finance (Free, No API Key Required)
+#### Using wrdata (Recommended)
 
 ```python
 import fractime as ft
+import wrdata as wr
 
-# Get stock data
-data = ft.get_yahoo_data("AAPL", "2020-01-01", "2024-01-01")
+# Get stock data using wrdata
+data = wr.get("AAPL", start="2020-01-01", end="2024-01-01", source="yahoo")
+prices = data['Close'].values
 
-# Get index data
-sp500 = ft.get_yahoo_data("^GSPC", "2020-01-01", "2024-01-01")
+# Or use any wrdata source
+btc_data = wr.get("BTC-USD", start="2020-01-01", source="coingecko")
+btc_prices = btc_data['Close'].values
 
-# Get cryptocurrency data
-btc = ft.get_yahoo_data("BTC-USD", "2020-01-01", "2024-01-01")
+# Economic indicators
+gdp_data = wr.get("GDP", source="fred")
+gdp = gdp_data['value'].values
+
+# Use with FracTime
+analyzer = ft.FractalAnalyzer()
+hurst = analyzer.calculate_hurst_exponent(prices)
 ```
 
-#### Multiple Data Sources
+#### Using Custom Data
+
+FracTime works with any NumPy array or Pandas/Polars DataFrame:
 
 ```python
-from fractime.data_sources import get_data_with_fallback, list_sources
+import fractime as ft
+import numpy as np
+import pandas as pd
 
-# List all available data sources
-sources = list_sources()
-print(f"Available sources: {sources}")
+# Your custom time series data
+custom_data = np.array([100, 102, 101, 105, 103, ...])
 
-# Get data with automatic fallback
-data = get_data_with_fallback(
-    symbol="AAPL",
-    start_date="2020-01-01",
-    end_date="2024-01-01",
-    preferred_sources=["alpha_vantage", "yahoo", "twelve_data"]
-)
+# Or from a CSV
+df = pd.read_csv("my_timeseries.csv")
+prices = df['value'].values
+
+# Use directly with FracTime
+analyzer = ft.FractalAnalyzer()
+hurst = analyzer.calculate_hurst_exponent(custom_data)
 ```
 
-**Supported Data Sources:**
-- **Equities**: Yahoo Finance, Alpha Vantage, Twelve Data, Finnhub, Tiingo
-- **Crypto**: Binance, CoinGecko, Kraken
-- **Economic Data**: FRED (Federal Reserve), World Bank, ECB
-- **Forex & Commodities**: Various providers
+**Supported Data Types:**
+- **Financial**: Stocks, ETFs, indices, crypto, forex, commodities
+- **Economic**: GDP, inflation, unemployment, interest rates
+- **IoT/Sensor**: Temperature, energy consumption, traffic flow
+- **Business**: Sales, revenue, customer metrics, web traffic
+- **Any Temporal Data**: Works with any time-ordered numerical series
 
 ### Fractal Analysis
 
@@ -260,63 +317,176 @@ print(f"Volatility Scaling Exponent: {scaling_exponent:.3f}")
 - `analyze_volatility_scaling()`: How volatility changes with time horizon
 - `detect_regime_changes()`: Identify shifts in market behavior
 
-### Path Simulation
+### Path Simulation & Probability-Weighted Forecasting
 
-Generate realistic future price scenarios:
+**FracTime's Core Innovation**: Unlike traditional forecasters that output single point estimates, FracTime generates **probability-weighted scenario paths**—multiple possible futures with likelihood scores based on fractal similarity, regime matching, and historical patterns.
+
+#### Basic Path Simulation
+
+```python
+import fractime as ft
+import wrdata as wr
+
+# Load historical data
+data = wr.get("SPY", start="2020-01-01", source="yahoo")
+prices = data['Close'].values
+
+# Initialize simulator
+simulator = ft.FractalSimulator(prices)
+
+# Generate probability-weighted paths
+paths, metadata = simulator.simulate_paths(
+    n_steps=30,        # 30 days ahead
+    n_paths=1000,      # 1000 scenarios
+    n_clusters=5,      # Group into 5 scenario clusters
+    cloud_paths=100    # Generate high-probability path cloud
+)
+
+# Access probability information
+print(f"Cluster probabilities: {metadata['cluster_probs']}")
+print(f"Most likely path: {metadata['most_likely_path']}")
+print(f"High-probability paths: {metadata['probability_cloud'].shape}")
+print(f"Individual path probabilities: {metadata['path_probabilities']}")
+```
+
+#### Understanding Probability-Weighted Paths
+
+```python
+import fractime as ft
+import numpy as np
+
+# Simulate paths with probability weighting
+paths, metadata = simulator.simulate_paths(n_steps=30, n_paths=1000, n_clusters=5)
+
+# Extract probability information
+cluster_labels = metadata['labels']
+cluster_probs = metadata['cluster_probs']
+path_probs = metadata['path_probabilities']
+high_prob_paths = metadata['probability_cloud']
+
+# Analyze each scenario cluster
+for i in range(5):
+    cluster_mask = cluster_labels == i
+    cluster_paths = paths[cluster_mask]
+    cluster_prob = cluster_probs[i]
+
+    mean_outcome = np.mean(cluster_paths[:, -1])
+    std_outcome = np.std(cluster_paths[:, -1])
+
+    print(f"\nScenario {i+1} (Probability: {cluster_prob:.1%}):")
+    print(f"  Expected final value: {mean_outcome:.2f} ± {std_outcome:.2f}")
+    print(f"  Number of paths: {np.sum(cluster_mask)}")
+    print(f"  Return: {(mean_outcome / prices[-1] - 1):.1%}")
+
+# Find highest probability paths (top 10%)
+top_10_pct_threshold = np.percentile(path_probs, 90)
+high_prob_mask = path_probs >= top_10_pct_threshold
+high_prob_paths_indices = np.where(high_prob_mask)[0]
+
+print(f"\nTop 10% most likely paths: {len(high_prob_paths_indices)}")
+print(f"Average probability: {np.mean(path_probs[high_prob_mask]):.3f}")
+
+# Most likely single path
+most_likely_idx = np.argmax(path_probs)
+most_likely_path = paths[most_likely_idx]
+most_likely_prob = path_probs[most_likely_idx]
+
+print(f"\nMost likely path probability: {most_likely_prob:.3f}")
+print(f"Expected outcome: {most_likely_path[-1]:.2f}")
+```
+
+#### Advanced Simulation Methods
 
 ```python
 import fractime as ft
 
-# Initialize simulator
-simulator = ft.FractalSimulator()
-current_price = 100.0
-
-# Method 1: Fractional Brownian Motion
-paths_fbm = simulator.simulate_paths(
-    initial_price=current_price,
-    n_steps=30,        # 30 days ahead
-    n_paths=1000,      # 1000 scenarios
+# Method 1: Fractional Brownian Motion (FBM)
+# Best for: Trending/mean-reverting markets
+paths_fbm, meta_fbm = simulator.simulate_paths(
+    n_steps=30,
+    n_paths=1000,
     dt=1/252,          # Daily time step
-    hurst=0.6,         # Trending market
+    hurst=0.6,         # Hurst exponent (0.6 = trending)
     volatility=0.02    # 2% daily volatility
 )
 
-# Method 2: Pattern-Based Simulation
-historical_prices = ft.get_yahoo_data("SPY", "2020-01-01", "2024-01-01")['Close'].values
-paths_pattern = simulator.simulate_patterns(
-    historical_prices=historical_prices,
+# Method 2: Pattern-Based Simulation with Regime Matching
+# Best for: Markets with recurring patterns
+paths_pattern, meta_pattern = simulator.simulate_paths(
+    n_steps=30,
     n_paths=1000,
-    forecast_horizon=30,
+    use_patterns=True,
     pattern_length=20,
     recency_weight=0.7  # Favor recent patterns
 )
 
-# Method 3: Bootstrap Simulation
-paths_bootstrap = simulator.bootstrap_paths(
-    historical_returns=np.diff(np.log(historical_prices)),
-    initial_price=current_price,
+# Method 3: Regime-Switching Simulation
+# Best for: Markets with distinct states (bull/bear/neutral)
+paths_regime, meta_regime = simulator.simulate_paths(
     n_steps=30,
     n_paths=1000,
-    block_size=5       # Block bootstrap for autocorrelation
+    use_regimes=True,
+    n_regimes=3,       # Identify 3 market regimes
+    regime_lookback=252 # 1 year of regime history
 )
 
-# Method 4: Regime-Based Simulation
-paths_regime = simulator.simulate_with_regimes(
-    historical_prices=historical_prices,
+# Method 4: Trading Time Simulation
+# Best for: Incorporating volume/volatility effects
+paths_time, meta_time = simulator.simulate_paths(
+    n_steps=30,
     n_paths=1000,
-    forecast_horizon=30,
-    n_regimes=3        # Identify 3 market regimes
+    use_trading_time=True,  # Warp time based on activity
+    volumes=volumes if volumes is not None else None
 )
-
-print(f"Generated {paths_fbm.shape[0]} paths with {paths_fbm.shape[1]} time steps")
 ```
 
-**Simulation Methods:**
+#### Probability-Based Decision Making
 
-- `simulate_paths()`: Fractional Brownian motion (FBM)
-- `simulate_patterns()`: Pattern-weighted path generation
-- `bootstrap_paths()`: Non-parametric resampling
-- `simulate_with_regimes()`: Regime-switching models
+```python
+import fractime as ft
+import numpy as np
+
+# Generate probability-weighted paths
+paths, metadata = simulator.simulate_paths(n_steps=30, n_paths=1000, n_clusters=5)
+
+# Decision 1: What's the probability of reaching a target?
+target_price = prices[-1] * 1.10  # 10% gain
+prob_reach_target = np.mean(paths[:, -1] >= target_price)
+print(f"Probability of 10% gain: {prob_reach_target:.1%}")
+
+# Decision 2: What's the most likely outcome?
+most_likely_cluster = np.argmax(metadata['cluster_probs'])
+most_likely_paths = paths[metadata['labels'] == most_likely_cluster]
+expected_outcome = np.mean(most_likely_paths[:, -1])
+print(f"Most likely outcome: {expected_outcome:.2f} ({metadata['cluster_probs'][most_likely_cluster]:.1%} probability)")
+
+# Decision 3: What's the downside risk?
+prob_loss = np.mean(paths[:, -1] < prices[-1])
+var_95 = np.percentile(paths[:, -1], 5)  # Value at Risk (95%)
+print(f"Probability of loss: {prob_loss:.1%}")
+print(f"95% VaR: {var_95:.2f} ({(var_95/prices[-1]-1):.1%} loss)")
+
+# Decision 4: High-probability path envelope
+high_prob_paths = metadata['probability_cloud']
+upper_bound = np.percentile(high_prob_paths, 75, axis=0)
+lower_bound = np.percentile(high_prob_paths, 25, axis=0)
+median_path = np.median(high_prob_paths, axis=0)
+
+print(f"\nHigh-probability path envelope (25th-75th percentile):")
+print(f"  Upper bound at T+30: {upper_bound[-1]:.2f}")
+print(f"  Median at T+30: {median_path[-1]:.2f}")
+print(f"  Lower bound at T+30: {lower_bound[-1]:.2f}")
+```
+
+**Key Metadata Returned:**
+
+- `cluster_probs`: Probability of each scenario cluster
+- `path_probabilities`: Individual probability score for each path
+- `most_likely_path`: Single highest-probability trajectory
+- `probability_cloud`: Set of high-probability paths
+- `cluster_weights`: Fractal similarity scores for each cluster
+- `pattern_matches`: Number of historical pattern matches
+- `centroids`: Representative path for each cluster
 
 ### Path Analysis & Clustering
 
@@ -442,21 +612,156 @@ fig1.write_image("simulation_results.png", width=1200, height=600)
 - `plot_fractal_analysis()`: Hurst exponent and regime charts
 - `plot_path_heatmap()`: 2D density visualization
 
-### Forecasting Methods
+### Forecasting Methods: What Makes FracTime Unique
 
-Compare multiple forecasting approaches:
+**FracTime is purpose-built for forecasting.** While libraries like `statsmodels`, `sklearn`, and `prophet` provide traditional time series forecasting, FracTime offers **fractal-based and probability-weighted forecasting methods** that capture long-term memory, self-similarity, and regime transitions—phenomena that traditional methods miss.
+
+#### Why Traditional Forecasters Fall Short
+
+Traditional time series libraries struggle with:
+- **Long-term dependencies** beyond simple autoregression
+- **Self-similar patterns** that repeat across time scales
+- **Regime transitions** (bull to bear markets, seasonal shifts)
+- **Fat-tailed distributions** (extreme events are more common than assumed)
+- **Probabilistic scenarios** (not just point estimates)
+
+#### FracTime's Unique Forecasting Capabilities
 
 ```python
 from fractime.forecasting import (
-    ARIMAForecaster,
-    StateTransitionFRSRForecaster,
-    FractalProjectionForecaster,
-    RandomForestForecaster,
-    XGBoostForecaster
+    StateTransitionFRSRForecaster,      # Fractal regime-switching (UNIQUE)
+    FractalProjectionForecaster,        # Hurst-based projection (UNIQUE)
+    FractalClassificationForecaster,    # Pattern classification (UNIQUE)
+    RescaledRangeForecaster,           # R/S analysis forecasting (UNIQUE)
+    FractalInterpolationForecaster,    # Multi-scale interpolation (UNIQUE)
+    FractalReductionForecaster         # Dimensionality reduction (UNIQUE)
 )
-import polars as pl
+```
 
-# Prepare your data (create lag features)
+#### 1. State-Transition FRSR: Fractal Regime-Switching
+
+**What it does:** Identifies fractal regimes (trending, mean-reverting, volatile) and forecasts based on state transitions between regimes.
+
+**Why it's unique:** Captures regime changes that ARIMA/Prophet miss. Traditional methods assume stationarity; ST-FRSR embraces non-stationarity.
+
+```python
+import fractime as ft
+import wrdata as wr
+import numpy as np
+
+# Load data
+data = wr.get("SPY", start="2020-01-01", source="yahoo")
+prices = data['Close'].values
+
+# State-Transition FRSR Forecaster
+st_frsr = ft.forecasting.StateTransitionFRSRForecaster(
+    n_patterns=20,      # Number of fractal patterns to identify
+    n_regimes=3,        # Identify 3 regimes (bull, bear, neutral)
+    lookback=252        # Use 1 year of history
+)
+
+# Fit the model
+st_frsr.fit(prices)
+
+# Forecast next 30 days with regime probabilities
+forecast, regime_probs = st_frsr.predict(horizon=30, return_regimes=True)
+
+print(f"30-day forecast: {forecast[-1]:.2f}")
+print(f"Regime probabilities: Bull={regime_probs[0]:.1%}, Neutral={regime_probs[1]:.1%}, Bear={regime_probs[2]:.1%}")
+
+# Key advantage: Forecasts adapt to regime changes
+if regime_probs[2] > 0.5:  # Bear regime detected
+    print("⚠️ High probability of bear regime - adjust risk accordingly")
+```
+
+#### 2. Fractal Projection: Hurst-Based Forecasting
+
+**What it does:** Uses the Hurst exponent to project future values based on long-term memory and trend persistence.
+
+**Why it's unique:** Accounts for **memory** in time series. If H=0.7 (trending), forecasts will continue the trend. If H=0.3 (mean-reverting), forecasts will revert to mean.
+
+```python
+import fractime as ft
+
+# Calculate Hurst exponent
+analyzer = ft.FractalAnalyzer()
+hurst = analyzer.calculate_hurst_exponent(prices)
+
+# Fractal Projection Forecaster
+proj_forecaster = ft.forecasting.FractalProjectionForecaster(
+    hurst=hurst,           # Use calculated Hurst
+    scaling_factor=1.0,    # Volatility scaling
+    adaptive=True          # Adapt to changing Hurst
+)
+
+proj_forecaster.fit(prices)
+forecast = proj_forecaster.predict(horizon=30)
+
+print(f"Hurst exponent: {hurst:.3f}")
+if hurst > 0.5:
+    print(f"Trending market detected - projection amplifies momentum")
+else:
+    print(f"Mean-reverting market detected - projection dampens extremes")
+
+# Compare to ARIMA (which ignores long-term memory)
+from fractime.forecasting import ARIMAForecaster
+arima = ARIMAForecaster(p=1, d=1, q=1)
+arima.fit(prices)
+arima_forecast = arima.predict(horizon=30)
+
+print(f"\nFractal Projection: {forecast[-1]:.2f}")
+print(f"ARIMA (no memory): {arima_forecast[-1]:.2f}")
+print(f"Difference: {abs(forecast[-1] - arima_forecast[-1]):.2f}")
+```
+
+#### 3. Pattern Classification: Self-Similar Pattern Matching
+
+**What it does:** Finds self-similar patterns across time scales and forecasts based on what historically happened after similar patterns.
+
+**Why it's unique:** Leverages **fractal self-similarity**—the insight that market patterns repeat at different scales.
+
+```python
+import fractime as ft
+
+# Pattern Classification Forecaster
+pattern_forecaster = ft.forecasting.FractalClassificationForecaster(
+    pattern_length=20,     # Length of patterns to match
+    n_patterns=10,         # Top 10 similar patterns
+    min_similarity=0.7,    # Minimum correlation threshold
+    multi_scale=True       # Search across multiple time scales
+)
+
+pattern_forecaster.fit(prices)
+forecast, pattern_info = pattern_forecaster.predict(
+    horizon=30,
+    return_patterns=True
+)
+
+print(f"Found {len(pattern_info['matches'])} similar historical patterns")
+print(f"Average similarity: {pattern_info['avg_similarity']:.1%}")
+print(f"Forecast based on pattern outcomes: {forecast[-1]:.2f}")
+
+# Inspect matched patterns
+for i, match in enumerate(pattern_info['matches'][:3]):
+    print(f"\nPattern {i+1}:")
+    print(f"  Start date: {match['date']}")
+    print(f"  Similarity: {match['similarity']:.1%}")
+    print(f"  Outcome after 30 days: {match['outcome']:.2f}")
+```
+
+#### 4. Comprehensive Forecasting Comparison
+
+```python
+import fractime as ft
+import wrdata as wr
+import polars as pl
+import numpy as np
+
+# Load data
+data = wr.get("AAPL", start="2020-01-01", source="yahoo")
+prices = data['Close'].values
+
+# Prepare features (for ML methods)
 def prepare_data(prices, n_lags=5):
     df = pl.DataFrame({'price': prices})
     for i in range(1, n_lags + 1):
@@ -465,61 +770,120 @@ def prepare_data(prices, n_lags=5):
         )
     return df.drop_nulls()
 
-data = prepare_data(historical_prices, n_lags=5)
+data_prepared = prepare_data(prices, n_lags=5)
 feature_cols = [f'lag_{i}' for i in range(1, 6)]
 
-# Initialize forecasters
+# Initialize ALL forecasters
 forecasters = {
-    'ARIMA': ARIMAForecaster(p=1, d=1, q=1),
-    'ST-FRSR': StateTransitionFRSRForecaster(n_patterns=10),
-    'Fractal Projection': FractalProjectionForecaster(hurst=0.6),
-    'Random Forest': RandomForestForecaster(n_estimators=100),
-    'XGBoost': XGBoostForecaster(n_estimators=100),
+    # Traditional Statistical (baseline)
+    'ARIMA(1,1,1)': ft.forecasting.ARIMAForecaster(p=1, d=1, q=1),
+    'Exponential Smoothing': ft.forecasting.ExponentialSmoothingForecaster(),
+
+    # FracTime's Unique Fractal Methods
+    'ST-FRSR': ft.forecasting.StateTransitionFRSRForecaster(n_patterns=10, n_regimes=3),
+    'Fractal Projection': ft.forecasting.FractalProjectionForecaster(),
+    'Pattern Classification': ft.forecasting.FractalClassificationForecaster(),
+    'Rescaled Range': ft.forecasting.RescaledRangeForecaster(),
+    'Fractal Interpolation': ft.forecasting.FractalInterpolationForecaster(),
+
+    # Machine Learning (for comparison)
+    'Random Forest': ft.forecasting.RandomForestForecaster(n_estimators=100),
+    'XGBoost': ft.forecasting.XGBoostForecaster(n_estimators=100),
+    'KNN': ft.forecasting.KNNForecaster(n_neighbors=5),
 }
 
 # Train and forecast with each method
 results = {}
 for name, forecaster in forecasters.items():
-    # Fit the model
-    forecaster.fit(
-        data=data,
-        target_col='price',
-        feature_cols=feature_cols
-    )
+    try:
+        # Fractal methods work directly with prices
+        if 'Fractal' in name or 'FRSR' in name or 'Range' in name:
+            forecaster.fit(prices)
+            forecast = forecaster.predict(horizon=30)
+        # Statistical methods work with prices
+        elif 'ARIMA' in name or 'Smoothing' in name:
+            forecaster.fit(prices)
+            forecast = forecaster.predict(horizon=30)
+        # ML methods need features
+        else:
+            forecaster.fit(data_prepared, target_col='price', feature_cols=feature_cols)
+            forecast = forecaster.predict(data_prepared[-1:], horizon=30)
 
-    # Make predictions
-    forecast = forecaster.predict(
-        data=data[-1:],
-        horizon=30
-    )
+        results[name] = forecast
+        final_value = forecast[-1] if isinstance(forecast, np.ndarray) else forecast
+        change_pct = (final_value / prices[-1] - 1) * 100
+        print(f"{name:25s}: ${final_value:7.2f} ({change_pct:+5.1f}%)")
 
-    results[name] = forecast
-    print(f"{name}: 30-day forecast = {forecast[-1]:.2f}")
+    except Exception as e:
+        print(f"{name:25s}: Error - {e}")
 
-# Ensemble forecast (average of all methods)
-ensemble_forecast = np.mean([results[name] for name in results], axis=0)
-print(f"\nEnsemble: 30-day forecast = {ensemble_forecast[-1]:.2f}")
+# Ensemble: Combine fractal methods (they complement each other)
+fractal_forecasts = [
+    results[name] for name in results.keys()
+    if 'Fractal' in name or 'FRSR' in name or 'Range' in name
+]
+ensemble_fractal = np.mean(fractal_forecasts, axis=0)
+print(f"\n{'Fractal Ensemble':25s}: ${ensemble_fractal[-1]:7.2f} ({(ensemble_fractal[-1]/prices[-1]-1)*100:+5.1f}%)")
+
+# Compare to traditional ensemble
+traditional_forecasts = [
+    results[name] for name in ['ARIMA(1,1,1)', 'Exponential Smoothing']
+    if name in results
+]
+ensemble_traditional = np.mean(traditional_forecasts, axis=0)
+print(f"{'Traditional Ensemble':25s}: ${ensemble_traditional[-1]:7.2f} ({(ensemble_traditional[-1]/prices[-1]-1)*100:+5.1f}%)")
 ```
 
-**Available Forecasters:**
+#### 5. When to Use Each Fractal Forecaster
 
-**Statistical Methods:**
-- `ARIMAForecaster`: Auto-regressive integrated moving average
-- `SARIMAForecaster`: Seasonal ARIMA
-- `ExponentialSmoothingForecaster`: ETS models
+| Forecaster | Best For | Key Advantage |
+|------------|----------|---------------|
+| **ST-FRSR** | Markets with regime changes | Adapts to bull/bear/neutral transitions |
+| **Fractal Projection** | Trending or mean-reverting series | Accounts for long-term memory (Hurst) |
+| **Pattern Classification** | Recurring patterns | Finds self-similar historical patterns |
+| **Rescaled Range** | Volatility forecasting | Predicts range of outcomes based on R/S |
+| **Fractal Interpolation** | Missing data/irregular sampling | Multi-scale gap filling |
+| **Fractal Reduction** | High-dimensional data | Preserves fractal structure in lower dims |
 
-**Fractal Methods:**
-- `StateTransitionFRSRForecaster`: Fractal regime-switching
-- `FractalProjectionForecaster`: Hurst-based projection
-- `FractalClassificationForecaster`: Pattern classification
-- `RescaledRangeForecaster`: R/S analysis forecasting
-- `FractalInterpolationForecaster`: Multi-scale interpolation
+#### 6. Ensemble Forecasting (Recommended)
 
-**Machine Learning:**
-- `RandomForestForecaster`: Ensemble of decision trees
-- `XGBoostForecaster`: Gradient boosting
-- `SVRForecaster`: Support vector regression
-- `KNNForecaster`: K-nearest neighbors
+**Best practice**: Combine multiple fractal forecasters for robust predictions.
+
+```python
+import fractime as ft
+import numpy as np
+
+# Create ensemble of complementary methods
+forecasters = {
+    'st_frsr': ft.forecasting.StateTransitionFRSRForecaster(),
+    'projection': ft.forecasting.FractalProjectionForecaster(),
+    'pattern': ft.forecasting.FractalClassificationForecaster(),
+}
+
+# Fit all forecasters
+forecasts = {}
+for name, forecaster in forecasters.items():
+    forecaster.fit(prices)
+    forecasts[name] = forecaster.predict(horizon=30)
+
+# Simple average ensemble
+ensemble_simple = np.mean(list(forecasts.values()), axis=0)
+
+# Weighted ensemble (based on recent performance)
+# You would calculate weights based on backtest results
+weights = {'st_frsr': 0.4, 'projection': 0.3, 'pattern': 0.3}
+ensemble_weighted = sum(weights[name] * forecasts[name] for name in weights)
+
+print(f"Simple ensemble: {ensemble_simple[-1]:.2f}")
+print(f"Weighted ensemble: {ensemble_weighted[-1]:.2f}")
+
+# Confidence interval from ensemble spread
+ensemble_std = np.std(list(forecasts.values()), axis=0)
+upper_ci = ensemble_simple + 1.96 * ensemble_std
+lower_ci = ensemble_simple - 1.96 * ensemble_std
+
+print(f"95% CI: [{lower_ci[-1]:.2f}, {upper_ci[-1]:.2f}]")
+```
 
 ### Backtesting Framework
 
@@ -581,14 +945,18 @@ for model_name, metrics in results.items():
 
 ## Advanced Examples
 
-### Example 1: Market Regime Detection
+### Example 1: Adaptive Forecasting with Regime Detection
+
+**Use Case**: Automatically adjust forecast methods based on detected market regimes.
 
 ```python
 import fractime as ft
+import wrdata as wr
 import numpy as np
 
 # Load data
-prices = ft.get_yahoo_data("SPY", "2010-01-01", "2024-01-01")['Close'].values
+data = wr.get("SPY", start="2010-01-01", source="yahoo")
+prices = data['Close'].values
 
 # Initialize analyzer
 analyzer = ft.FractalAnalyzer()
@@ -596,40 +964,190 @@ analyzer = ft.FractalAnalyzer()
 # Detect regimes using HMM
 regimes = analyzer.detect_regime_changes(
     prices,
-    n_regimes=3,      # Bull, bear, sideways
+    n_regimes=3,      # Bull, bear, neutral
     lookback=252      # 1-year rolling window
 )
 
 # Analyze each regime
 returns = np.diff(np.log(prices))
+regime_names = ['Bull', 'Neutral', 'Bear']
+
 for regime_id in range(3):
     mask = regimes[1:] == regime_id
     regime_returns = returns[mask]
 
-    print(f"\nRegime {regime_id + 1}:")
-    print(f"  Frequency: {np.mean(mask):.1%}")
+    print(f"\n{regime_names[regime_id]} Regime:")
+    print(f"  Frequency: {np.mean(mask):.1%} of time")
     print(f"  Avg Return: {np.mean(regime_returns) * 252:.1%} (annualized)")
     print(f"  Volatility: {np.std(regime_returns) * np.sqrt(252):.1%}")
     print(f"  Sharpe: {np.mean(regime_returns) / np.std(regime_returns) * np.sqrt(252):.2f}")
 
-# Forecast regime probabilities
+# Forecast with regime-specific methods
+current_regime = regimes[-1]
+print(f"\nCurrent Regime: {regime_names[current_regime]}")
+
+# Adaptive forecasting based on regime
+if current_regime == 0:  # Bull regime
+    # Use trend-following fractal projection
+    forecaster = ft.forecasting.FractalProjectionForecaster(hurst=0.65)
+    print("Using Fractal Projection (trending) for Bull regime")
+elif current_regime == 2:  # Bear regime
+    # Use mean-reverting pattern classification
+    forecaster = ft.forecasting.FractalClassificationForecaster()
+    print("Using Pattern Classification (mean-reverting) for Bear regime")
+else:  # Neutral regime
+    # Use balanced ST-FRSR
+    forecaster = ft.forecasting.StateTransitionFRSRForecaster()
+    print("Using ST-FRSR (balanced) for Neutral regime")
+
+# Generate forecast
+forecaster.fit(prices)
+forecast = forecaster.predict(horizon=30)
+
+print(f"\n30-day forecast: ${forecast[-1]:.2f} ({(forecast[-1]/prices[-1]-1):.1%} change)")
+
+# Regime transition probabilities
 regime_probs = analyzer.forecast_regime_probabilities(prices, horizon=30)
 print(f"\n30-Day Regime Probabilities:")
 for i, prob in enumerate(regime_probs):
-    print(f"  Regime {i+1}: {prob:.1%}")
+    print(f"  {regime_names[i]}: {prob:.1%}")
+
+# Risk management based on regime forecast
+if regime_probs[2] > 0.4:  # High bear probability
+    print("\n⚠️ WARNING: High bear regime probability - consider defensive positioning")
 ```
 
-### Example 2: Multi-Asset Portfolio Simulation
+### Example 2: Multi-Horizon Ensemble Forecasting
+
+**Use Case**: Combine multiple forecasting methods for robust short, medium, and long-term predictions.
 
 ```python
 import fractime as ft
+import wrdata as wr
+import numpy as np
+
+# Load data
+data = wr.get("AAPL", start="2020-01-01", source="yahoo")
+prices = data['Close'].values
+
+# Define forecast horizons
+horizons = {
+    'short_term': 5,      # 1 week
+    'medium_term': 21,    # 1 month
+    'long_term': 63       # 1 quarter
+}
+
+# Initialize multiple forecasters
+forecasters = {
+    'Pattern Classification': ft.forecasting.FractalClassificationForecaster(),
+    'ST-FRSR': ft.forecasting.StateTransitionFRSRForecaster(),
+    'Fractal Projection': ft.forecasting.FractalProjectionForecaster(),
+}
+
+# Train all forecasters
+for name, forecaster in forecasters.items():
+    forecaster.fit(prices)
+
+# Generate forecasts for each horizon
+print(f"Current Price: ${prices[-1]:.2f}\n")
+
+for horizon_name, horizon_days in horizons.items():
+    print(f"{horizon_name.replace('_', ' ').title()} ({horizon_days} days):")
+
+    forecasts = {}
+    for forecaster_name, forecaster in forecasters.items():
+        forecast = forecaster.predict(horizon=horizon_days)
+        forecasts[forecaster_name] = forecast[-1]
+        change = (forecast[-1] / prices[-1] - 1) * 100
+        print(f"  {forecaster_name:25s}: ${forecast[-1]:7.2f} ({change:+5.1f}%)")
+
+    # Ensemble forecast
+    ensemble = np.mean(list(forecasts.values()))
+    ensemble_change = (ensemble / prices[-1] - 1) * 100
+    print(f"  {'Ensemble':25s}: ${ensemble:7.2f} ({ensemble_change:+5.1f}%)")
+
+    # Forecast agreement (low spread = high confidence)
+    spread = np.std(list(forecasts.values()))
+    print(f"  Forecast Spread (σ): ${spread:.2f}\n")
+
+# Identify consensus opportunities
+print("\nForecast Analysis:")
+# Short-term consensus
+short_forecasts = [f.predict(horizon=5)[-1] for f in forecasters.values()]
+short_agreement = np.std(short_forecasts) / np.mean(short_forecasts)
+
+if short_agreement < 0.02:  # Less than 2% disagreement
+    direction = "bullish" if np.mean(short_forecasts) > prices[-1] else "bearish"
+    print(f"✓ Strong {direction} consensus for short-term (spread < 2%)")
+else:
+    print(f"⚠ Divergent short-term forecasts (spread {short_agreement:.1%}) - proceed with caution")
+```
+
+### Example 3: Non-Financial Time Series Forecasting
+
+**Use Case**: Apply FracTime to energy consumption, temperature, or any time series data.
+
+```python
+import fractime as ft
+import numpy as np
+import pandas as pd
+
+# Example: Energy consumption data (replace with your data)
+# This could be from IoT sensors, business metrics, etc.
+df = pd.read_csv("energy_consumption.csv")
+energy = df['kwh'].values
+
+# Analyze fractal properties
+analyzer = ft.FractalAnalyzer()
+hurst = analyzer.calculate_hurst_exponent(energy)
+
+print(f"Energy Consumption Hurst Exponent: {hurst:.3f}")
+if hurst > 0.5:
+    print("→ Energy usage shows persistent patterns (trends continue)")
+else:
+    print("→ Energy usage shows mean-reverting patterns (spikes revert)")
+
+# Forecast with appropriate method
+if hurst > 0.6:
+    # High persistence: use projection
+    forecaster = ft.forecasting.FractalProjectionForecaster(hurst=hurst)
+elif hurst < 0.4:
+    # Mean-reverting: use pattern classification
+    forecaster = ft.forecasting.FractalClassificationForecaster()
+else:
+    # Moderate: use regime-switching
+    forecaster = ft.forecasting.StateTransitionFRSRForecaster()
+
+forecaster.fit(energy)
+forecast_7d = forecaster.predict(horizon=7 * 24)  # 7 days of hourly data
+
+# Energy planning insights
+current_avg = np.mean(energy[-24:])  # Last 24 hours
+forecast_avg = np.mean(forecast_7d)
+
+print(f"\nEnergy Forecast:")
+print(f"  Current 24h average: {current_avg:.1f} kWh")
+print(f"  Next 7 days average: {forecast_avg:.1f} kWh")
+print(f"  Expected change: {(forecast_avg/current_avg - 1):.1%}")
+
+# Peak demand forecast
+peak_forecast = np.max(forecast_7d)
+print(f"  Peak demand forecast: {peak_forecast:.1f} kWh")
+```
+
+### Example 4: Multi-Asset Portfolio Simulation
+
+```python
+import fractime as ft
+import wrdata as wr
 import numpy as np
 
 # Load multiple assets
 assets = ['SPY', 'TLT', 'GLD', 'QQQ']
 data = {}
 for symbol in assets:
-    data[symbol] = ft.get_yahoo_data(symbol, "2020-01-01", "2024-01-01")['Close'].values
+    asset_data = wr.get(symbol, start="2020-01-01", source="yahoo")
+    data[symbol] = asset_data['Close'].values
 
 # Calculate correlation matrix
 returns_matrix = np.array([np.diff(np.log(data[symbol])) for symbol in assets])
