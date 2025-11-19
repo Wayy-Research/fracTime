@@ -3692,49 +3692,49 @@ def plot_forecast_interactive(
     prices: np.ndarray,
     result: dict,
     dates: np.ndarray = None,
-    title: str = "Interactive Fractal Forecast",
-    top_n_paths: int = 50,
-    show_all_paths: bool = False
+    title: str = "Probability-Weighted Forecast",
+    top_n_paths: int = 20,
+    show_probability_cloud: bool = True
 ):
     """
-    Create an interactive Altair visualization of probability-weighted forecast paths.
+    Create interactive Plotly visualization showing probability-weighted forecast paths.
 
-    This highlights high-probability paths based on fractal similarity to historical
-    patterns and multi-scale consistency.
+    Shows high-probability paths as distinct "branches" with probability clouds,
+    making it easy to see which futures are most likely based on fractal similarity.
 
     Args:
         prices: Historical price data
         result: Result dict from forecaster.predict() (must include 'paths' and 'probabilities')
         dates: Date array for x-axis (optional)
         title: Chart title
-        top_n_paths: Number of highest-probability paths to highlight (default 50)
-        show_all_paths: If True, show all paths with opacity based on probability
+        top_n_paths: Number of highest-probability paths to show clearly (default 20)
+        show_probability_cloud: Show probability density cloud (default True)
 
     Returns:
-        Altair chart object (call .show() to display in notebook or .save() to file)
+        Plotly figure object (call .show() to display or .write_html() to save)
 
     Example:
         >>> result = forecaster.predict(n_steps=30)
-        >>> chart = ft.plot_forecast_interactive(prices, result)
-        >>> chart.show()  # In Jupyter
-        >>> chart.save('forecast.html')  # Save to file
+        >>> fig = ft.plot_forecast_interactive(prices, result)
+        >>> fig.show()  # Display interactive chart
+        >>> fig.write_html('forecast.html')  # Save to file
     """
-    import altair as alt
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     import pandas as pd
 
     prices = _ensure_numpy_array(prices)
     paths = result['paths']
     probabilities = result['probabilities']
-    forecast = result.get('weighted_forecast', result['forecast'])
+    weighted_forecast = result.get('weighted_forecast', result['forecast'])
 
     n_hist = len(prices)
     n_forecast = paths.shape[1]
 
-    # Prepare historical data
+    # Prepare x-axis
     if dates is not None:
         dates = _ensure_numpy_array(dates)
         x_hist = dates[-n_hist:]
-        # Generate future dates
         last_date = x_hist[-1]
         if isinstance(last_date, (pd.Timestamp, np.datetime64)):
             x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
@@ -3744,123 +3744,148 @@ def plot_forecast_interactive(
         x_hist = np.arange(n_hist)
         x_forecast = np.arange(n_forecast) + n_hist
 
-    # Create DataFrames for Altair
-    hist_df = pd.DataFrame({
-        'step': range(len(x_hist)),
-        'date': x_hist,
-        'price': prices,
-        'type': 'Historical'
-    })
+    # Create figure
+    fig = go.Figure()
 
-    # Get top probability paths
-    top_indices = np.argsort(probabilities)[-top_n_paths:]
+    # 1. Historical data
+    fig.add_trace(go.Scatter(
+        x=x_hist,
+        y=prices,
+        mode='lines',
+        name='Historical',
+        line=dict(color='black', width=2),
+        hovertemplate='<b>Historical</b><br>Value: %{y:.2f}<extra></extra>'
+    ))
 
-    # Prepare path data
-    path_data = []
-    for idx in top_indices:
+    # 2. Probability cloud (all paths with low opacity)
+    if show_probability_cloud:
+        # Show all paths as light background cloud
+        for i in range(len(paths)):
+            # Opacity based on probability (very light for low probability)
+            opacity = min(probabilities[i] * 500, 0.15)  # Scale up but cap
+            fig.add_trace(go.Scatter(
+                x=x_forecast,
+                y=paths[i],
+                mode='lines',
+                line=dict(color='lightblue', width=0.5),
+                opacity=opacity,
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+    # 3. High-probability paths (top N)
+    top_indices = np.argsort(probabilities)[-top_n_paths:][::-1]  # Highest first
+
+    # Color scale for top paths
+    colors = []
+    for i, idx in enumerate(top_indices):
+        # Gradient from dark blue (highest) to light blue (lowest of top N)
+        intensity = 1.0 - (i / top_n_paths) * 0.6  # 1.0 to 0.4
+        colors.append(f'rgba(0, {int(100 * (1-intensity))}, {int(255 * intensity)}, 0.8)')
+
+    for i, idx in enumerate(top_indices):
         prob = probabilities[idx]
         path = paths[idx]
-        for step, value in enumerate(path):
-            path_data.append({
-                'step': n_hist + step,
-                'date': x_forecast[step],
-                'price': value,
-                'path_id': idx,
-                'probability': prob,
-                'type': 'Forecast Path'
-            })
+        final_value = path[-1]
 
-    path_df = pd.DataFrame(path_data)
+        # Width based on rank (thicker for higher probability)
+        width = 3 if i == 0 else max(2.5 - i * 0.1, 1)
 
-    # Probability-weighted forecast line
-    forecast_df = pd.DataFrame({
-        'step': range(n_hist, n_hist + n_forecast),
-        'date': x_forecast,
-        'price': forecast,
-        'type': 'Weighted Forecast'
-    })
+        fig.add_trace(go.Scatter(
+            x=x_forecast,
+            y=path,
+            mode='lines+markers',
+            name=f'Path #{i+1} (p={prob:.4f})',
+            line=dict(color=colors[i], width=width),
+            marker=dict(size=4 if i < 5 else 0),  # Only show markers for top 5
+            hovertemplate=f'<b>Path #{i+1}</b><br>' +
+                         f'Probability: {prob:.5f}<br>' +
+                         f'Value: %{{y:.2f}}<br>' +
+                         f'Final: {final_value:.2f}<extra></extra>',
+            legendgroup='high_prob',
+            legendgrouptitle=dict(text='High-Probability Paths')
+        ))
 
-    # Confidence intervals
-    ci_df = pd.DataFrame({
-        'step': range(n_hist, n_hist + n_forecast),
-        'date': x_forecast,
-        'lower': result['lower'],
-        'upper': result['upper'],
-        'type': 'Confidence Interval'
-    })
+    # 4. Weighted forecast
+    fig.add_trace(go.Scatter(
+        x=x_forecast,
+        y=weighted_forecast,
+        mode='lines',
+        name='Weighted Forecast',
+        line=dict(color='red', width=3, dash='dash'),
+        hovertemplate='<b>Weighted Forecast</b><br>Value: %{y:.2f}<extra></extra>'
+    ))
 
-    # Create Altair chart
-    base = alt.Chart().encode(
-        x=alt.X('date:T' if dates is not None else 'step:Q', title='Time'),
-        y=alt.Y('price:Q', title='Value', scale=alt.Scale(zero=False))
+    # 5. Confidence intervals
+    fig.add_trace(go.Scatter(
+        x=x_forecast,
+        y=result['upper'],
+        mode='lines',
+        name='95% CI',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    fig.add_trace(go.Scatter(
+        x=x_forecast,
+        y=result['lower'],
+        mode='lines',
+        fill='tonexty',
+        fillcolor='rgba(0, 255, 0, 0.1)',
+        line=dict(width=0),
+        name='95% Confidence',
+        hoverinfo='skip'
+    ))
+
+    # 6. Annotations for top 3 paths at final point
+    for i in range(min(3, len(top_indices))):
+        idx = top_indices[i]
+        prob = probabilities[idx]
+        final_value = paths[idx, -1]
+
+        fig.add_annotation(
+            x=x_forecast[-1],
+            y=final_value,
+            text=f"#{i+1}: {prob:.4f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.5,
+            arrowcolor=colors[i],
+            ax=40 if i == 0 else 35,
+            ay=-30 * (i+1),
+            font=dict(size=10, color=colors[i], family='monospace'),
+            bgcolor='white',
+            bordercolor=colors[i],
+            borderwidth=1,
+            borderpad=2
+        )
+
+    # Layout
+    fig.update_layout(
+        title=dict(
+            text=title,
+            font=dict(size=18, family='Arial Black')
+        ),
+        xaxis_title='Time',
+        yaxis_title='Value',
+        hovermode='closest',
+        template='plotly_white',
+        height=600,
+        width=1000,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor='rgba(255, 255, 255, 0.8)',
+            bordercolor='black',
+            borderwidth=1
+        ),
+        font=dict(family='Arial', size=12)
     )
 
-    # Historical line
-    historical = alt.Chart(hist_df).mark_line(
-        color='black',
-        strokeWidth=2
-    ).encode(
-        x='date:T' if dates is not None else 'step:Q',
-        y='price:Q',
-        tooltip=['date:T' if dates is not None else 'step:Q', alt.Tooltip('price:Q', format='.2f')]
-    )
-
-    # Confidence interval band
-    ci_band = alt.Chart(ci_df).mark_area(
-        opacity=0.2,
-        color='green'
-    ).encode(
-        x='date:T' if dates is not None else 'step:Q',
-        y='lower:Q',
-        y2='upper:Q',
-        tooltip=[
-            'date:T' if dates is not None else 'step:Q',
-            alt.Tooltip('lower:Q', format='.2f', title='Lower 95%'),
-            alt.Tooltip('upper:Q', format='.2f', title='Upper 95%')
-        ]
-    )
-
-    # High-probability paths with opacity based on probability
-    paths_chart = alt.Chart(path_df).mark_line(
-        strokeWidth=1
-    ).encode(
-        x='date:T' if dates is not None else 'step:Q',
-        y='price:Q',
-        detail='path_id:N',
-        opacity=alt.Opacity('probability:Q', scale=alt.Scale(range=[0.1, 0.8]), legend=None),
-        color=alt.Color('probability:Q',
-                       scale=alt.Scale(scheme='blues', domain=[probabilities[top_indices].min(),
-                                                                probabilities[top_indices].max()]),
-                       legend=alt.Legend(title='Path Probability')),
-        tooltip=[
-            'date:T' if dates is not None else 'step:Q',
-            alt.Tooltip('price:Q', format='.2f'),
-            alt.Tooltip('probability:Q', format='.4f', title='Probability')
-        ]
-    )
-
-    # Weighted forecast line
-    weighted_line = alt.Chart(forecast_df).mark_line(
-        color='red',
-        strokeWidth=3,
-        strokeDash=[5, 5]
-    ).encode(
-        x='date:T' if dates is not None else 'step:Q',
-        y='price:Q',
-        tooltip=[
-            'date:T' if dates is not None else 'step:Q',
-            alt.Tooltip('price:Q', format='.2f', title='Weighted Forecast')
-        ]
-    )
-
-    # Combine layers
-    chart = (ci_band + paths_chart + historical + weighted_line).properties(
-        width=800,
-        height=400,
-        title=title
-    ).interactive()
-
-    return chart
+    return fig
 
 
 # Example usage
