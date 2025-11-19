@@ -4025,7 +4025,7 @@ def plot_forecast_interactive(
         # Show all paths as light background cloud
         for i in range(len(paths)):
             # Opacity based on probability (more visible for higher probability)
-            opacity = min(probabilities[i] * 1000, 0.25)  # Increased visibility
+            opacity = min(probabilities[i] * 1000, 0.6)  # Increased from 0.25 to 0.6 for visibility
             fig.add_trace(go.Scatter(
                 x=x_forecast,
                 y=paths[i],
@@ -4133,7 +4133,11 @@ def plot_forecast_interactive(
             text=title,
             font=dict(size=18, family='Arial Black')
         ),
-        xaxis_title='Time',
+        xaxis=dict(
+            title='Date',
+            tickformat='%Y-%m-%d',
+            tickangle=-45
+        ),
         yaxis_title='Value',
         hovermode='closest',
         template='plotly_white',
