@@ -3517,6 +3517,44 @@ class FractalForecaster:
 
         return self
 
+    def _remove_duplicate_paths(self, paths: np.ndarray, probabilities: np.ndarray = None,
+                                 add_noise: bool = True, noise_scale: float = 1e-6) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Remove duplicate paths and optionally add small noise to near-duplicates.
+
+        Args:
+            paths: Array of paths (n_paths x n_steps)
+            probabilities: Optional probability weights (will be preserved for unique paths)
+            add_noise: Whether to add small noise to break ties
+            noise_scale: Scale of noise relative to price level (default 1e-6 = 0.0001%)
+
+        Returns:
+            Tuple of (unique_paths, unique_probabilities)
+        """
+        # Find unique paths
+        unique_paths, unique_indices, inverse_indices, counts = np.unique(
+            paths, axis=0, return_index=True, return_inverse=True, return_counts=True
+        )
+
+        # If probabilities provided, aggregate probabilities for duplicates
+        if probabilities is not None:
+            unique_probs = np.zeros(len(unique_paths))
+            for i, idx in enumerate(unique_indices):
+                # Sum probabilities of all paths that map to this unique path
+                duplicate_mask = inverse_indices == i
+                unique_probs[i] = np.sum(probabilities[duplicate_mask])
+        else:
+            unique_probs = None
+
+        # Add small noise if requested to break near-duplicates
+        if add_noise and len(unique_paths) < len(paths) * 0.9:  # Only if >10% duplicates
+            # Add noise proportional to each path's values
+            for i in range(len(unique_paths)):
+                noise = np.random.normal(0, noise_scale * np.abs(unique_paths[i]), size=unique_paths.shape[1])
+                unique_paths[i] += noise
+
+        return unique_paths, unique_probs
+
     def _calculate_path_probabilities(self, paths: np.ndarray) -> np.ndarray:
         """
         Calculate probability weights for each path based on fractal similarity
@@ -3739,6 +3777,22 @@ class FractalForecaster:
             pattern_weight=0.4,
             use_trading_time=True
         )
+
+        # Diagnostic: Check for duplicate paths
+        unique_paths, unique_indices, counts = np.unique(
+            paths, axis=0, return_index=True, return_counts=True
+        )
+        n_duplicates = np.sum(counts > 1)
+
+        if n_duplicates > 0:
+            import warnings
+            pct_duplicates = (n_duplicates / len(paths)) * 100
+            warnings.warn(
+                f"Found {n_duplicates} duplicate paths ({pct_duplicates:.1f}% of {len(paths)} paths). "
+                f"This may indicate an issue with path generation. "
+                f"Consider using more n_paths or checking random state.",
+                UserWarning
+            )
 
         # Calculate path probabilities based on fractal similarity
         probabilities = self._calculate_path_probabilities(paths)
