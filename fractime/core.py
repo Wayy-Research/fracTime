@@ -4025,12 +4025,12 @@ def plot_forecast_interactive(
         # Show all paths as light background cloud
         for i in range(len(paths)):
             # Opacity based on probability (more visible for higher probability)
-            opacity = min(probabilities[i] * 1000, 0.6)  # Increased from 0.25 to 0.6 for visibility
+            opacity = min(probabilities[i] * 2000, 0.9)  # Increased multiplier and cap for better visibility
             fig.add_trace(go.Scatter(
                 x=x_forecast,
                 y=paths[i],
                 mode='lines',
-                line=dict(color='lightblue', width=0.8),
+                line=dict(color='lightblue', width=1.2),  # Increased width
                 opacity=opacity,
                 showlegend=False,
                 hoverinfo='skip'
@@ -4135,6 +4135,7 @@ def plot_forecast_interactive(
         ),
         xaxis=dict(
             title='Date',
+            type='date',
             tickformat='%Y-%m-%d',
             tickangle=-45
         ),
