@@ -40,12 +40,31 @@ dependencies = [
 ml-extra = [
     "xgboost>=2.0.0",
 ]
+bayesian = [
+    "pymc>=5.10.0",
+    "arviz>=0.18.0",
+    "pytensor>=2.18.0",
+]
+baselines = [
+    "pmdarima>=2.0.0",
+    "arch>=6.0.0",
+    "prophet>=1.1.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "black>=24.2.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
+]
+all = [
+    "pymc>=5.10.0",
+    "arviz>=0.18.0",
+    "pytensor>=2.18.0",
+    "pmdarima>=2.0.0",
+    "arch>=6.0.0",
+    "prophet>=1.1.0",
+    "xgboost>=2.0.0",
 ]
 
 [tool.ruff]
