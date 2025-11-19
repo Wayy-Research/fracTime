@@ -3979,6 +3979,10 @@ def plot_forecast_interactive(
         if dates is not None:
             dates = _ensure_numpy_array(dates)
             x_hist = dates[-n_hist:]
+            # Convert numpy datetime64 to pandas Timestamp for Plotly compatibility
+            if len(x_hist) > 0 and np.issubdtype(x_hist.dtype, np.datetime64):
+                import pandas as pd
+                x_hist = pd.to_datetime(x_hist)
         else:
             # No historical dates provided, use indices
             x_hist = np.arange(n_hist)
@@ -3986,19 +3990,26 @@ def plot_forecast_interactive(
         # Use forecast dates from result
         if forecast_dates is not None:
             x_forecast = _ensure_numpy_array(forecast_dates)
+            # Convert numpy datetime64 to pandas Timestamp for Plotly compatibility
+            if len(x_forecast) > 0 and np.issubdtype(x_forecast.dtype, np.datetime64):
+                import pandas as pd
+                x_forecast = pd.to_datetime(x_forecast)
         else:
             # Try to generate from historical dates
             if dates is not None:
                 last_date = x_hist[-1]
                 if isinstance(last_date, (datetime, np.datetime64)):
                     # Use polars for date range generation
-                    last_date_pl = pl.Series([last_date]).cast(pl.Datetime)[0]
+                    last_date_pl = pl.Series([last_date]).cast(pl.Datetime).item()
                     x_forecast = pl.datetime_range(
                         start=last_date_pl,
                         end=None,
                         interval='1d',
                         eager=True
                     ).slice(1, n_forecast).to_numpy()
+                    # Convert to pandas Timestamp for Plotly compatibility
+                    import pandas as pd
+                    x_forecast = pd.to_datetime(x_forecast)
                 else:
                     x_forecast = np.arange(n_forecast) + n_hist
             else:
