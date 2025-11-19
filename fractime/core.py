@@ -3460,27 +3460,33 @@ class FractalForecaster:
         Returns:
             Frequency string ('D', 'H', 'min', etc.)
         """
-        from datetime import datetime
-        import pandas as pd
-
-        # Convert to pandas DatetimeIndex for easy frequency detection
+        # Convert to polars Series for datetime operations
         if isinstance(dates[0], str):
-            dates_pd = pd.to_datetime(dates)
+            dates_pl = pl.Series(dates).str.to_datetime()
         else:
-            dates_pd = pd.DatetimeIndex(dates)
+            # Convert numpy datetime64 or datetime objects to polars
+            dates_pl = pl.Series(dates)
+            if dates_pl.dtype != pl.Datetime:
+                dates_pl = dates_pl.cast(pl.Datetime)
 
-        # Infer frequency
-        freq = pd.infer_freq(dates_pd)
-        if freq is None:
-            # Manual detection if infer_freq fails
-            diff = dates_pd[1] - dates_pd[0]
-            if diff.total_seconds() < 3600:
-                return 'min'
-            elif diff.total_seconds() < 86400:
-                return 'H'
-            else:
-                return 'D'
-        return freq
+        # Calculate difference between consecutive dates
+        diffs = dates_pl.diff().drop_nulls()
+
+        # Get the most common difference (mode)
+        if len(diffs) == 0:
+            return 'D'  # Default to daily
+
+        # Convert to seconds for easy comparison
+        # Polars duration is in microseconds by default
+        diff_seconds = diffs[0].total_seconds() if hasattr(diffs[0], 'total_seconds') else (diffs[0] / 1_000_000)
+
+        # Infer frequency based on typical difference
+        if diff_seconds < 3600:
+            return 'min'
+        elif diff_seconds < 86400:
+            return 'H'
+        else:
+            return 'D'
 
     def fit(self, prices: np.ndarray, dates: np.ndarray = None):
         """
@@ -3634,20 +3640,39 @@ class FractalForecaster:
         Returns:
             Number of steps
         """
-        import pandas as pd
-
         if self.dates_history is None:
             raise ValueError("Cannot use end_date without historical dates. Call fit() with dates first.")
 
-        # Parse dates
-        last_date = pd.to_datetime(self.dates_history[-1])
-        target_date = pd.to_datetime(end_date)
+        # Convert last date to polars datetime (handle different input types)
+        last_date_value = self.dates_history[-1]
+
+        # Handle numpy datetime64, pandas Timestamp, datetime, or string
+        if isinstance(last_date_value, np.datetime64):
+            # Convert numpy datetime64 to datetime
+            last_date = pl.from_numpy(np.array([last_date_value], dtype='datetime64[ns]')).item()
+        elif isinstance(last_date_value, str):
+            last_date = pl.Series([last_date_value]).str.to_datetime().item()
+        else:
+            # datetime or other types
+            last_date = pl.Series([last_date_value]).cast(pl.Datetime).item()
+
+        # Parse target date
+        target_date = pl.Series([end_date]).str.to_datetime().item()
 
         if target_date <= last_date:
             raise ValueError(f"end_date ({target_date}) must be after last historical date ({last_date})")
 
-        # Generate date range and count steps
-        date_range = pd.date_range(start=last_date, end=target_date, freq=self.frequency)
+        # Generate date range and count steps using polars
+        if self.frequency == 'D':
+            interval = '1d'
+        elif self.frequency == 'H':
+            interval = '1h'
+        elif self.frequency == 'min':
+            interval = '1m'
+        else:
+            interval = '1d'  # Default
+
+        date_range = pl.datetime_range(start=last_date, end=target_date, interval=interval, eager=True)
         n_steps = len(date_range) - 1  # Exclude the start date
 
         return n_steps
@@ -3738,9 +3763,47 @@ class FractalForecaster:
 
         # Add forecast dates if historical dates available
         if self.dates_history is not None:
-            import pandas as pd
-            last_date = pd.to_datetime(self.dates_history[-1])
-            forecast_dates = pd.date_range(start=last_date, periods=n_steps + 1, freq=self.frequency)[1:]
+            # Convert last date to polars datetime (handle different input types)
+            last_date_value = self.dates_history[-1]
+
+            # Handle numpy datetime64, pandas Timestamp, datetime, or string
+            if isinstance(last_date_value, np.datetime64):
+                # Convert numpy datetime64 to polars
+                last_date = pl.from_numpy(np.array([last_date_value], dtype='datetime64[ns]')).item()
+            elif isinstance(last_date_value, str):
+                last_date = pl.Series([last_date_value]).str.to_datetime().item()
+            else:
+                # datetime or other types
+                last_date = pl.Series([last_date_value]).cast(pl.Datetime).item()
+
+            # Map frequency to polars interval and compute end date
+            if self.frequency == 'D':
+                interval = '1d'
+                from datetime import timedelta
+                end_date_calc = last_date + timedelta(days=n_steps)
+            elif self.frequency == 'H':
+                interval = '1h'
+                from datetime import timedelta
+                end_date_calc = last_date + timedelta(hours=n_steps)
+            elif self.frequency == 'min':
+                interval = '1m'
+                from datetime import timedelta
+                end_date_calc = last_date + timedelta(minutes=n_steps)
+            else:
+                interval = '1d'  # Default
+                from datetime import timedelta
+                end_date_calc = last_date + timedelta(days=n_steps)
+
+            # Generate forecast dates using polars
+            all_dates = pl.datetime_range(
+                start=last_date,
+                end=end_date_calc,
+                interval=interval,
+                eager=True
+            )
+            # Skip the first date (which is the last historical date)
+            forecast_dates = all_dates.slice(1, n_steps)
+
             result['dates'] = forecast_dates.to_numpy()
 
         return result
@@ -3788,8 +3851,16 @@ def plot_forecast(prices: np.ndarray,
             n_forecast = len(forecast) if forecast is not None else paths.shape[1]
             last_date = x_hist[-1]
 
-            if isinstance(last_date, (datetime, pd.Timestamp)):
-                x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+            # Check if date is datetime-like (datetime, np.datetime64)
+            if isinstance(last_date, (datetime, np.datetime64)):
+                # Use polars for date range generation
+                last_date_pl = pl.Series([last_date]).cast(pl.Datetime)[0]
+                x_forecast = pl.datetime_range(
+                    start=last_date_pl,
+                    end=None,
+                    interval='1d',
+                    eager=True
+                ).slice(1, n_forecast).to_numpy()
             else:
                 x_forecast = np.arange(n_forecast) + n_hist
     else:
@@ -3841,7 +3912,7 @@ def plot_forecast(prices: np.ndarray,
     ax.grid(True, alpha=0.3)
 
     # Format dates if using datetime
-    if dates is not None and isinstance(x_hist[0], (datetime, pd.Timestamp)):
+    if dates is not None and isinstance(x_hist[0], (datetime, np.datetime64)):
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         fig.autofmt_xdate()
 
@@ -3890,7 +3961,6 @@ def plot_forecast_interactive(
     """
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    import pandas as pd
 
     prices = _ensure_numpy_array(prices)
     paths = result['paths']
@@ -3920,8 +3990,15 @@ def plot_forecast_interactive(
             # Try to generate from historical dates
             if dates is not None:
                 last_date = x_hist[-1]
-                if isinstance(last_date, (pd.Timestamp, np.datetime64)):
-                    x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+                if isinstance(last_date, (datetime, np.datetime64)):
+                    # Use polars for date range generation
+                    last_date_pl = pl.Series([last_date]).cast(pl.Datetime)[0]
+                    x_forecast = pl.datetime_range(
+                        start=last_date_pl,
+                        end=None,
+                        interval='1d',
+                        eager=True
+                    ).slice(1, n_forecast).to_numpy()
                 else:
                     x_forecast = np.arange(n_forecast) + n_hist
             else:
