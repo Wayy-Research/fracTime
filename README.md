@@ -99,15 +99,17 @@ result = forecaster.predict(n_steps=30)
 
 ```python
 import fractime as ft
+import polars as pl
 import numpy as np
 
-# Generate data and forecast
+# Generate data with dates
 np.random.seed(42)
 prices = 100 + np.random.randn(500).cumsum()
+dates = pl.date_range(end=pl.datetime(2025, 11, 19), interval='1d', eager=True).tail(500)
 
 forecaster = ft.FractalForecaster()
-forecaster.fit(prices)
-result = forecaster.predict(n_steps=30, n_paths=500)
+forecaster.fit(prices, dates=dates.to_numpy())
+result = forecaster.predict(end_date='2025-12-19', n_paths=500)
 
 # Create interactive visualization
 # Paths are colored and sized by probability based on:
@@ -117,6 +119,7 @@ result = forecaster.predict(n_steps=30, n_paths=500)
 chart = ft.plot_forecast_interactive(
     prices=prices,
     result=result,
+    dates=dates.to_numpy(),  # ← IMPORTANT: Include dates for proper x-axis!
     title="Probability-Weighted Forecast Paths",
     top_n_paths=50  # Show top 50 most likely paths
 )
@@ -127,6 +130,13 @@ chart.show()
 # Or save to HTML
 chart.write_html('forecast.html')
 ```
+
+**Important:** When working with datetime data, always pass the `dates` parameter to `plot_forecast_interactive()`. This ensures:
+- ✓ Proper date formatting on x-axis (YYYY-MM-DD)
+- ✓ Visual continuity between historical and forecast data
+- ✓ Correct time alignment of all traces
+
+Without `dates`, the historical data will use integer indices while forecast uses dates, causing rendering issues.
 
 The interactive chart shows:
 - **Historical data** (black line)

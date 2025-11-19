@@ -4036,8 +4036,14 @@ def plot_forecast_interactive(
     last_hist_price = prices[-1]
     if hasattr(x_hist, '__len__') and len(x_hist) > 0:
         last_hist_date = x_hist[-1]
-        # Concatenate last historical point with forecast dates
-        x_forecast_plot = np.concatenate([[last_hist_date], x_forecast])
+        # Check if dtypes are compatible before concatenating
+        # (e.g., both datetime or both numeric)
+        try:
+            # Attempt to concatenate - will fail if dtypes incompatible
+            x_forecast_plot = np.concatenate([[last_hist_date], x_forecast])
+        except (np.DTypePromotionError, TypeError):
+            # Dtypes incompatible (e.g., int vs datetime) - don't prepend
+            x_forecast_plot = x_forecast
     else:
         x_forecast_plot = x_forecast
 
