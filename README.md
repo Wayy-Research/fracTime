@@ -130,14 +130,14 @@ chart.write_html('forecast.html')
 
 The interactive chart shows:
 - **Historical data** (black line)
-- **Probability cloud** (all paths with opacity by probability)
-- **High-probability paths** (dark blue gradient, top N paths)
+- **Probability cloud** (light blue, all paths with opacity by probability)
+- **High-probability paths** (orange-red gradient, top N paths with clean lines)
 - **Probability-weighted forecast** (red dashed line)
 - **95% confidence interval** (green band)
 - **Interactive tooltips** with values and probabilities
 - **Probability labels** for top 3 paths
 
-Hover over paths to see their exact probability!
+**Clean visualization:** High-probability paths use distinct orange-red colors with gradient based on rank, making them easy to distinguish from the background cloud. No markers - just smooth lines!
 
 ---
 
@@ -331,9 +331,10 @@ chart.write_html('forecast.html')  # Save to HTML file
 ```
 
 **Features:**
-- Probability cloud showing all possible paths
-- High-probability paths highlighted with dark blue gradient
-- Paths colored and sized by fractal similarity probability
+- Probability cloud showing all possible paths (light blue)
+- High-probability paths highlighted with orange-red gradient
+- Clean lines only (no markers) for easy viewing
+- Line thickness based on probability rank
 - Probability labels for top 3 paths
 - Interactive hover tooltips
 - Zoom and pan

@@ -3863,6 +3863,13 @@ def plot_forecast_interactive(
     Shows high-probability paths as distinct "branches" with probability clouds,
     making it easy to see which futures are most likely based on fractal similarity.
 
+    Visualization features:
+    - Light blue probability cloud (all paths with opacity by probability)
+    - High-probability paths in orange-red gradient (darker = higher probability)
+    - Clean lines only (no markers) for easy viewing
+    - Line thickness varies by probability rank
+    - Top 3 paths labeled with exact probabilities
+
     Args:
         prices: Historical price data
         result: Result dict from forecaster.predict() (must include 'paths' and 'probabilities')
@@ -3955,12 +3962,16 @@ def plot_forecast_interactive(
     # 3. High-probability paths (top N)
     top_indices = np.argsort(probabilities)[-top_n_paths:][::-1]  # Highest first
 
-    # Color scale for top paths
+    # Color gradient for high-probability paths
+    # Use orange-red gradient to distinguish from blue cloud
     colors = []
     for i, idx in enumerate(top_indices):
-        # Gradient from dark blue (highest) to light blue (lowest of top N)
-        intensity = 1.0 - (i / top_n_paths) * 0.6  # 1.0 to 0.4
-        colors.append(f'rgba(0, {int(100 * (1-intensity))}, {int(255 * intensity)}, 0.8)')
+        # Gradient from dark orange/red (highest) to lighter orange (lowest of top N)
+        intensity = 1.0 - (i / top_n_paths) * 0.5  # 1.0 to 0.5
+        r = int(255 * intensity)
+        g = int(140 * (1 - intensity * 0.5))  # Varies from ~70 to 140
+        b = 0
+        colors.append(f'rgba({r}, {g}, {b}, 0.7)')
 
     for i, idx in enumerate(top_indices):
         prob = probabilities[idx]
@@ -3968,15 +3979,14 @@ def plot_forecast_interactive(
         final_value = path[-1]
 
         # Width based on rank (thicker for higher probability)
-        width = 3 if i == 0 else max(2.5 - i * 0.1, 1)
+        width = 2.5 if i == 0 else max(2.0 - i * 0.05, 1.0)
 
         fig.add_trace(go.Scatter(
             x=x_forecast,
             y=path,
-            mode='lines+markers',
+            mode='lines',
             name=f'Path #{i+1} (p={prob:.4f})',
             line=dict(color=colors[i], width=width),
-            marker=dict(size=4 if i < 5 else 0),  # Only show markers for top 5
             hovertemplate=f'<b>Path #{i+1}</b><br>' +
                          f'Probability: {prob:.5f}<br>' +
                          f'Value: %{{y:.2f}}<br>' +
