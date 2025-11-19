@@ -819,11 +819,16 @@ class FractalSimulator:
             self.time_map = self.time_warper.compute_time_transformation(self.prices)
             print("Trading time mapping computed with price data only")
         
-        # Initialize quantum price level generator
-        from fractime.quantum import QuantumPriceLevelGenerator
-        self.quantum_generator = QuantumPriceLevelGenerator(energy_levels=5)
-        self.quantum_levels = self.quantum_generator.generate_price_levels(self.prices)
-        print("Quantum price levels generated")
+        # Initialize quantum price level generator (optional feature)
+        try:
+            from fractime.quantum import QuantumPriceLevelGenerator
+            self.quantum_generator = QuantumPriceLevelGenerator(energy_levels=5)
+            self.quantum_levels = self.quantum_generator.generate_price_levels(self.prices)
+            print("Quantum price levels generated")
+        except ImportError:
+            print("Quantum module not available, skipping quantum price levels")
+            self.quantum_generator = None
+            self.quantum_levels = None
         
         # Prepare sampled data for faster simulations
         if len(self.prices) > 1000:
@@ -1119,7 +1124,12 @@ class FractalSimulator:
                 # Get n_steps returns from this regime
                 regime_returns = historical_returns[start_idx:start_idx+lookback_window]
                 # Randomly select a continuous segment of length n_steps
-                segment_start = np.random.randint(0, len(regime_returns) - n_steps)
+                # Handle edge case where regime_returns length equals n_steps
+                max_start = max(0, len(regime_returns) - n_steps)
+                if max_start == 0:
+                    segment_start = 0
+                else:
+                    segment_start = np.random.randint(0, max_start)
                 path_returns = regime_returns[segment_start:segment_start+n_steps]
                 
                 # For trading time approach, get corresponding dilation factors
@@ -1797,9 +1807,14 @@ class TradingTimeWarper:
             vol = np.zeros(n)
             for i in range(window, n):
                 vol[i] = np.std(log_returns[i-window:i]) * np.sqrt(252)  # Annualized
-            
+
             # Fill initial points with first valid value
-            vol[:window] = vol[window]
+            # Handle edge case where window >= n
+            if window < n:
+                vol[:window] = vol[window]
+            else:
+                # If window is >= data length, compute volatility over all available data
+                vol[:] = np.std(log_returns) * np.sqrt(252)
             volatility_series[window] = vol
         
         # Combine volatilities with different weights (emphasize recent)

@@ -22,8 +22,6 @@ classifiers = [
     "Topic :: Office/Business :: Financial",
 ]
 dependencies = [
-    "hmmlearn>=0.3.3",
-    "ipython>=8.32.0",
     "matplotlib>=3.10.0",
     "numba>=0.61.0",
     "numpy>=2.1.3",
@@ -36,22 +34,12 @@ dependencies = [
     "scipy>=1.15.2",
     "statsmodels>=0.14.4",
     "yfinance>=0.2.54",
-    # Data sources
-    "alpha-vantage>=2.3.0",
-    "pycoingecko>=3.1.0",
-    "python-binance>=1.0.0",
-    "fredapi>=0.5.0",
-    "wbgapi>=1.0.0",
-    "pandasdmx>=1.9.0",
-    "twelvedata>=1.2.0",
-    "finnhub-python>=2.4.0",
-    "tiingo>=0.14.0",
-    "krakenex>=2.1.0",
-    "ecbdata>=0.1.0",
-    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
+ml-extra = [
+    "xgboost>=2.0.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
