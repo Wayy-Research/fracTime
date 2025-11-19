@@ -143,11 +143,24 @@ The interactive chart shows:
 - **Probability cloud** (light blue, all paths with opacity by probability)
 - **High-probability paths** (orange-red gradient, top N paths with clean lines)
 - **Probability-weighted forecast** (red dashed line)
-- **95% confidence interval** (green band)
+- **95% probability-weighted confidence interval** (green band - based on path likelihoods, not just quantiles)
 - **Interactive tooltips** with values and probabilities
 - **Probability labels** for top 3 paths
 
 **Clean visualization:** High-probability paths use distinct orange-red colors with gradient based on rank, making them easy to distinguish from the background cloud. No markers - just smooth lines!
+
+**Probability-Weighted CI:** Unlike traditional confidence intervals that treat all paths equally, our weighted CI accounts for path probabilities. More likely paths contribute more to the confidence bounds, giving you a more accurate uncertainty range.
+
+```python
+# Forecast results include both standard and weighted CI
+result = forecaster.predict(end_date='2025-11-27')
+
+print(f"Standard 95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
+print(f"Weighted 95% CI: [{result['weighted_lower'][-1]:.2f}, {result['weighted_upper'][-1]:.2f}]")
+
+# Visualization uses weighted CI by default
+chart = ft.plot_forecast_interactive(prices, result, dates=dates, use_weighted_ci=True)
+```
 
 ---
 

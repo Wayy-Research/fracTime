@@ -3696,8 +3696,10 @@ class FractalForecaster:
                 'forecast': np.ndarray - Median forecast
                 'weighted_forecast': np.ndarray - Probability-weighted forecast
                 'mean': np.ndarray - Mean forecast
-                'lower': np.ndarray - Lower confidence bound
-                'upper': np.ndarray - Upper confidence bound
+                'lower': np.ndarray - Lower confidence bound (simple quantile)
+                'upper': np.ndarray - Upper confidence bound (simple quantile)
+                'weighted_lower': np.ndarray - Probability-weighted lower CI
+                'weighted_upper': np.ndarray - Probability-weighted upper CI
                 'std': np.ndarray - Standard deviation
                 'paths': np.ndarray - All simulated paths (n_paths x n_steps)
                 'probabilities': np.ndarray - Probability weight for each path
@@ -3749,6 +3751,33 @@ class FractalForecaster:
         # Probability-weighted forecast (in addition to median)
         weighted_forecast = np.average(paths, axis=0, weights=probabilities)
 
+        # Calculate probability-weighted confidence intervals
+        weighted_lower = np.zeros(n_steps)
+        weighted_upper = np.zeros(n_steps)
+
+        for t in range(n_steps):
+            # Get values at this time step
+            values = paths[:, t]
+
+            # Sort by value
+            sorted_indices = np.argsort(values)
+            sorted_values = values[sorted_indices]
+            sorted_probs = probabilities[sorted_indices]
+
+            # Calculate cumulative probability
+            cumsum_probs = np.cumsum(sorted_probs)
+
+            # Find weighted quantiles
+            lower_idx = np.searchsorted(cumsum_probs, alpha)
+            upper_idx = np.searchsorted(cumsum_probs, 1 - alpha)
+
+            # Ensure indices are within bounds
+            lower_idx = min(lower_idx, len(sorted_values) - 1)
+            upper_idx = min(upper_idx, len(sorted_values) - 1)
+
+            weighted_lower[t] = sorted_values[lower_idx]
+            weighted_upper[t] = sorted_values[upper_idx]
+
         # Generate forecast dates if historical dates were provided
         result = {
             'forecast': np.median(paths, axis=0),
@@ -3756,6 +3785,8 @@ class FractalForecaster:
             'mean': np.mean(paths, axis=0),
             'lower': np.percentile(paths, lower_pct, axis=0),
             'upper': np.percentile(paths, upper_pct, axis=0),
+            'weighted_lower': weighted_lower,  # New: probability-weighted CI
+            'weighted_upper': weighted_upper,  # New: probability-weighted CI
             'std': np.std(paths, axis=0),
             'paths': paths,
             'probabilities': probabilities
@@ -3926,7 +3957,8 @@ def plot_forecast_interactive(
     dates: np.ndarray = None,
     title: str = "Probability-Weighted Forecast",
     top_n_paths: int = 20,
-    show_probability_cloud: bool = True
+    show_probability_cloud: bool = True,
+    use_weighted_ci: bool = True
 ):
     """
     Create interactive Plotly visualization showing probability-weighted forecast paths.
@@ -3948,6 +3980,7 @@ def plot_forecast_interactive(
         title: Chart title
         top_n_paths: Number of highest-probability paths to show clearly (default 20)
         show_probability_cloud: Show probability density cloud (default True)
+        use_weighted_ci: Use probability-weighted CI instead of simple quantiles (default True)
 
     Returns:
         Plotly figure object (call .show() to display or .write_html() to save)
@@ -4121,15 +4154,25 @@ def plot_forecast_interactive(
     ))
 
     # 5. Confidence intervals
+    # Use probability-weighted CI if requested and available
+    if use_weighted_ci and 'weighted_upper' in result and 'weighted_lower' in result:
+        upper_ci = result['weighted_upper']
+        lower_ci = result['weighted_lower']
+        ci_label = '95% Weighted CI'
+    else:
+        upper_ci = result['upper']
+        lower_ci = result['lower']
+        ci_label = '95% CI'
+
     # Prepend last historical price for visual continuity
-    upper_with_connection = np.concatenate([[last_hist_price], result['upper']])
-    lower_with_connection = np.concatenate([[last_hist_price], result['lower']])
+    upper_with_connection = np.concatenate([[last_hist_price], upper_ci])
+    lower_with_connection = np.concatenate([[last_hist_price], lower_ci])
 
     fig.add_trace(go.Scatter(
         x=x_forecast_plot,
         y=upper_with_connection,
         mode='lines',
-        name='95% CI',
+        name=ci_label,
         line=dict(width=0),
         showlegend=False,
         hoverinfo='skip'
@@ -4141,7 +4184,7 @@ def plot_forecast_interactive(
         fill='tonexty',
         fillcolor='rgba(0, 255, 0, 0.1)',
         line=dict(width=0),
-        name='95% Confidence',
+        name=ci_label.replace('CI', 'Confidence'),
         hoverinfo='skip'
     ))
 
@@ -4185,7 +4228,7 @@ def plot_forecast_interactive(
         hovermode='closest',
         template='plotly_white',
         height=600,
-        width=1000,
+        autosize=True,  # Responsive width for Jupyter
         legend=dict(
             yanchor="top",
             y=0.99,
