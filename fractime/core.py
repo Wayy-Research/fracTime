@@ -4041,9 +4041,13 @@ def plot_forecast_interactive(
         try:
             # Attempt to concatenate - will fail if dtypes incompatible
             x_forecast_plot = np.concatenate([[last_hist_date], x_forecast])
-        except (np.DTypePromotionError, TypeError):
+        except (TypeError, Exception) as e:
             # Dtypes incompatible (e.g., int vs datetime) - don't prepend
-            x_forecast_plot = x_forecast
+            # Catches DTypePromotionError and other concatenation errors
+            if 'DType' in str(type(e).__name__) or 'promoted' in str(e):
+                x_forecast_plot = x_forecast
+            else:
+                raise
     else:
         x_forecast_plot = x_forecast
 
