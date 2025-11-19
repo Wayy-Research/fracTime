@@ -60,16 +60,16 @@ That's it! One method call gives you everything: forecast, confidence intervals,
 
 ```python
 import fractime as ft
-import pandas as pd
+import polars as pl
 import numpy as np
 
 # Your daily price data with dates
-dates = pd.date_range(end='2025-11-19', periods=500, freq='D')
+dates = pl.date_range(end=pl.datetime(2025, 11, 19), interval='1d', eager=True).tail(500)
 prices = np.random.randn(500).cumsum() + 100
 
 # Fit with dates
 forecaster = ft.FractalForecaster()
-forecaster.fit(prices, dates=dates)
+forecaster.fit(prices, dates=dates.to_numpy())
 
 # Method 1: Forecast to specific date (steps computed automatically!)
 result = forecaster.predict(end_date='2025-11-27')
@@ -364,13 +364,13 @@ print(f"10-step forecast: {result['forecast'][-1]:.2f}")
 ### With Real Data
 
 ```python
-import pandas as pd
+import polars as pl
 import fractime as ft
 
 # Load from CSV
-df = pd.read_csv('data.csv')
-prices = df['close'].values
-dates = pd.to_datetime(df['date'].values)
+df = pl.read_csv('data.csv')
+prices = df['close'].to_numpy()
+dates = df['date'].str.to_datetime().to_numpy()
 
 # Fit with dates (enables date-based forecasting)
 forecaster = ft.FractalForecaster()
@@ -392,13 +392,13 @@ fig.show()
 ### Date-Based Forecasting Examples
 
 ```python
-import pandas as pd
+import polars as pl
 import fractime as ft
 
 # Your daily price data
-df = pd.read_csv('data.csv')
-prices = df['close'].values
-dates = pd.to_datetime(df['date'].values)
+df = pl.read_csv('data.csv')
+prices = df['close'].to_numpy()
+dates = df['date'].str.to_datetime().to_numpy()
 
 # Fit with dates
 forecaster = ft.FractalForecaster()
