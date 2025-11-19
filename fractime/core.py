@@ -4031,15 +4031,27 @@ def plot_forecast_interactive(
         hovertemplate='<b>Historical</b><br>Value: %{y:.2f}<extra></extra>'
     ))
 
+    # Prepare forecast x-axis with connection point
+    # Prepend last historical date to forecast dates for visual continuity
+    last_hist_price = prices[-1]
+    if hasattr(x_hist, '__len__') and len(x_hist) > 0:
+        last_hist_date = x_hist[-1]
+        # Concatenate last historical point with forecast dates
+        x_forecast_plot = np.concatenate([[last_hist_date], x_forecast])
+    else:
+        x_forecast_plot = x_forecast
+
     # 2. Probability cloud (all paths with low opacity)
     if show_probability_cloud:
         # Show all paths as light background cloud
         for i in range(len(paths)):
             # Opacity based on probability (more visible for higher probability)
             opacity = min(probabilities[i] * 2000, 0.9)  # Increased multiplier and cap for better visibility
+            # Prepend last historical price for visual continuity
+            path_with_connection = np.concatenate([[last_hist_price], paths[i]])
             fig.add_trace(go.Scatter(
-                x=x_forecast,
-                y=paths[i],
+                x=x_forecast_plot,
+                y=path_with_connection,
                 mode='lines',
                 line=dict(color='lightblue', width=1.2),  # Increased width
                 opacity=opacity,
@@ -4069,9 +4081,12 @@ def plot_forecast_interactive(
         # Width based on rank (thicker for higher probability)
         width = 2.5 if i == 0 else max(2.0 - i * 0.05, 1.0)
 
+        # Prepend last historical price for visual continuity
+        path_with_connection = np.concatenate([[last_hist_price], path])
+
         fig.add_trace(go.Scatter(
-            x=x_forecast,
-            y=path,
+            x=x_forecast_plot,
+            y=path_with_connection,
             mode='lines',
             name='High-Probability Paths',  # Same name for all - groups in legend
             line=dict(color=colors[i], width=width),
@@ -4084,9 +4099,11 @@ def plot_forecast_interactive(
         ))
 
     # 4. Weighted forecast
+    # Prepend last historical price for visual continuity
+    weighted_with_connection = np.concatenate([[last_hist_price], weighted_forecast])
     fig.add_trace(go.Scatter(
-        x=x_forecast,
-        y=weighted_forecast,
+        x=x_forecast_plot,
+        y=weighted_with_connection,
         mode='lines',
         name='Weighted Forecast',
         line=dict(color='red', width=3, dash='dash'),
@@ -4094,9 +4111,13 @@ def plot_forecast_interactive(
     ))
 
     # 5. Confidence intervals
+    # Prepend last historical price for visual continuity
+    upper_with_connection = np.concatenate([[last_hist_price], result['upper']])
+    lower_with_connection = np.concatenate([[last_hist_price], result['lower']])
+
     fig.add_trace(go.Scatter(
-        x=x_forecast,
-        y=result['upper'],
+        x=x_forecast_plot,
+        y=upper_with_connection,
         mode='lines',
         name='95% CI',
         line=dict(width=0),
@@ -4104,8 +4125,8 @@ def plot_forecast_interactive(
         hoverinfo='skip'
     ))
     fig.add_trace(go.Scatter(
-        x=x_forecast,
-        y=result['lower'],
+        x=x_forecast_plot,
+        y=lower_with_connection,
         mode='lines',
         fill='tonexty',
         fillcolor='rgba(0, 255, 0, 0.1)',
