@@ -4244,6 +4244,155 @@ def plot_forecast_interactive(
     return fig
 
 
+def print_forecast_summary(result: dict, current_price: float = None, show_paths: int = 5):
+    """
+    Print a nicely formatted summary of forecast results.
+
+    Args:
+        result: Result dictionary from forecaster.predict()
+        current_price: Current/last price for comparison (optional)
+        show_paths: Number of top probability paths to display (default 5)
+
+    Example:
+        >>> result = forecaster.predict(end_date='2025-11-27')
+        >>> ft.print_forecast_summary(result, current_price=prices[-1])
+    """
+    import datetime
+
+    print("\n" + "=" * 70)
+    print("FORECAST SUMMARY")
+    print("=" * 70)
+
+    # Forecast period
+    n_steps = len(result['forecast'])
+    if 'dates' in result:
+        dates = result['dates']
+        print(f"\nPeriod: {dates[0]} to {dates[-1]} ({n_steps} steps)")
+    else:
+        print(f"\nSteps: {n_steps}")
+
+    # Current price comparison
+    if current_price is not None:
+        print(f"Current Price: ${current_price:.2f}")
+
+    # Point forecasts
+    print("\n" + "-" * 70)
+    print("POINT FORECASTS (at final step)")
+    print("-" * 70)
+
+    final_median = result['forecast'][-1]
+    final_weighted = result['weighted_forecast'][-1]
+    final_mean = result['mean'][-1]
+
+    print(f"  Median Forecast:           ${final_median:.2f}")
+    print(f"  Probability-Weighted:      ${final_weighted:.2f}  ← Recommended")
+    print(f"  Mean:                      ${final_mean:.2f}")
+
+    if current_price is not None:
+        change_pct = ((final_weighted - current_price) / current_price) * 100
+        direction = "↑" if change_pct > 0 else "↓"
+        print(f"\n  Expected Change:           {direction} {abs(change_pct):.2f}%")
+
+    # Confidence intervals
+    print("\n" + "-" * 70)
+    print("95% CONFIDENCE INTERVALS (at final step)")
+    print("-" * 70)
+
+    std_lower = result['lower'][-1]
+    std_upper = result['upper'][-1]
+    std_width = std_upper - std_lower
+
+    print(f"  Standard CI:      [${std_lower:.2f}, ${std_upper:.2f}]  (width: ${std_width:.2f})")
+
+    if 'weighted_lower' in result and 'weighted_upper' in result:
+        weighted_lower = result['weighted_lower'][-1]
+        weighted_upper = result['weighted_upper'][-1]
+        weighted_width = weighted_upper - weighted_lower
+
+        print(f"  Weighted CI:      [${weighted_lower:.2f}, ${weighted_upper:.2f}]  (width: ${weighted_width:.2f})  ← Recommended")
+
+        width_diff = ((weighted_width - std_width) / std_width) * 100
+        if abs(width_diff) > 1:
+            print(f"\n  Weighted CI is {abs(width_diff):.1f}% {'narrower' if width_diff < 0 else 'wider'}")
+
+    # Statistics
+    print("\n" + "-" * 70)
+    print("STATISTICS")
+    print("-" * 70)
+
+    final_std = result['std'][-1]
+    print(f"  Standard Deviation:        ${final_std:.2f}")
+    print(f"  Number of Paths:           {len(result['probabilities'])}")
+
+    # Path probabilities
+    print("\n" + "-" * 70)
+    print(f"TOP {show_paths} MOST LIKELY PATHS")
+    print("-" * 70)
+
+    paths = result['paths']
+    probs = result['probabilities']
+
+    # Sort by probability
+    top_indices = np.argsort(probs)[-show_paths:][::-1]
+
+    print(f"  {'Rank':<6} {'Probability':<15} {'Final Value':<15} {'Change':<10}")
+    print("  " + "-" * 60)
+
+    for rank, idx in enumerate(top_indices, 1):
+        prob = probs[idx]
+        final_val = paths[idx, -1]
+
+        if current_price is not None:
+            change = ((final_val - current_price) / current_price) * 100
+            change_str = f"{change:+.2f}%"
+        else:
+            change_str = "-"
+
+        # Visual probability bar
+        bar_length = int(prob * 1000)  # Scale up for visibility
+        bar = "█" * min(bar_length, 50)
+
+        print(f"  #{rank:<5} {prob:.6f} ({prob*100:.3f}%)  ${final_val:>8.2f}  {change_str:>9}  {bar}")
+
+    # Visual forecast range
+    print("\n" + "-" * 70)
+    print("FORECAST RANGE VISUALIZATION")
+    print("-" * 70)
+
+    if 'weighted_lower' in result and 'weighted_upper' in result:
+        lower = result['weighted_lower'][-1]
+        upper = result['weighted_upper'][-1]
+        ci_label = "Weighted 95% CI"
+    else:
+        lower = result['lower'][-1]
+        upper = result['upper'][-1]
+        ci_label = "Standard 95% CI"
+
+    forecast = final_weighted
+
+    # Create ASCII visualization
+    range_width = upper - lower
+    if range_width > 0:
+        # Scale to 60 characters
+        scale = 60 / range_width
+
+        lower_pos = 0
+        forecast_pos = int((forecast - lower) * scale)
+        upper_pos = 60
+
+        # Build visualization
+        viz = [" "] * 61
+        viz[lower_pos] = "["
+        viz[upper_pos] = "]"
+        viz[forecast_pos] = "●"
+
+        print(f"\n  ${lower:.2f}  {''.join(viz)}  ${upper:.2f}")
+        print(f"  {ci_label}: {''.join([' '] * forecast_pos)}↑")
+        print(f"  {' ' * (len(ci_label) + 2)}{''.join([' '] * forecast_pos)}Forecast: ${forecast:.2f}")
+
+    print("\n" + "=" * 70)
+
+
 # Example usage
 if __name__ == "__main__":
     # Get data

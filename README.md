@@ -164,6 +164,80 @@ chart = ft.plot_forecast_interactive(prices, result, dates=dates, use_weighted_c
 
 ---
 
+## Pretty Print Forecast Summary
+
+Get a nicely formatted summary of your forecast results:
+
+```python
+import fractime as ft
+import polars as pl
+import numpy as np
+
+# Your data
+prices = np.random.randn(200).cumsum() + 100
+dates = pl.date_range(end=pl.datetime(2025, 11, 19), interval='1d', eager=True).tail(200)
+
+# Forecast
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices, dates=dates.to_numpy())
+result = forecaster.predict(end_date='2025-11-27', n_paths=500)
+
+# Pretty print summary
+ft.print_forecast_summary(result, current_price=prices[-1], show_paths=10)
+```
+
+**Output:**
+```
+======================================================================
+FORECAST SUMMARY
+======================================================================
+
+Period: 2025-11-20 to 2025-11-27 (8 steps)
+Current Price: $91.85
+
+----------------------------------------------------------------------
+POINT FORECASTS (at final step)
+----------------------------------------------------------------------
+  Median Forecast:           $91.20
+  Probability-Weighted:      $91.13  ← Recommended
+  Mean:                      $91.15
+
+  Expected Change:           ↓ 0.78%
+
+----------------------------------------------------------------------
+95% CONFIDENCE INTERVALS (at final step)
+----------------------------------------------------------------------
+  Standard CI:      [$87.00, $95.78]  (width: $8.78)
+  Weighted CI:      [$87.02, $95.79]  (width: $8.77)  ← Recommended
+
+----------------------------------------------------------------------
+STATISTICS
+----------------------------------------------------------------------
+  Standard Deviation:        $2.18
+  Number of Paths:           500
+
+----------------------------------------------------------------------
+TOP 10 MOST LIKELY PATHS
+----------------------------------------------------------------------
+  Rank   Probability     Final Value     Change
+  ------------------------------------------------------------
+  #1     0.002494 (0.249%)  $   93.90     +2.24%  ██
+  #2     0.002492 (0.249%)  $   93.09     +1.36%  ██
+  ...
+
+----------------------------------------------------------------------
+FORECAST RANGE VISUALIZATION
+----------------------------------------------------------------------
+
+  $87.02  [                           ●                               ]  $95.79
+  Weighted 95% CI:                             ↑
+                                               Forecast: $91.13
+```
+
+Perfect for quick inspection in Jupyter notebooks or terminal output!
+
+---
+
 ## Complete Example
 
 ```python

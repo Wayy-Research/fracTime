@@ -9,7 +9,8 @@ from .core import (
     FractalSimulator,
     FractalForecaster,
     plot_forecast,
-    plot_forecast_interactive
+    plot_forecast_interactive,
+    print_forecast_summary
 )
 
 __version__ = "0.1.0"
@@ -18,5 +19,6 @@ __all__ = [
     'FractalSimulator',
     'FractalForecaster',
     'plot_forecast',
-    'plot_forecast_interactive'
+    'plot_forecast_interactive',
+    'print_forecast_summary'
 ]
