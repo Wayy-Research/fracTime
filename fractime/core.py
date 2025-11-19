@@ -4024,13 +4024,13 @@ def plot_forecast_interactive(
     if show_probability_cloud:
         # Show all paths as light background cloud
         for i in range(len(paths)):
-            # Opacity based on probability (very light for low probability)
-            opacity = min(probabilities[i] * 500, 0.15)  # Scale up but cap
+            # Opacity based on probability (more visible for higher probability)
+            opacity = min(probabilities[i] * 1000, 0.25)  # Increased visibility
             fig.add_trace(go.Scatter(
                 x=x_forecast,
                 y=paths[i],
                 mode='lines',
-                line=dict(color='lightblue', width=0.5),
+                line=dict(color='lightblue', width=0.8),
                 opacity=opacity,
                 showlegend=False,
                 hoverinfo='skip'
@@ -4048,7 +4048,7 @@ def plot_forecast_interactive(
         r = int(255 * intensity)
         g = int(140 * (1 - intensity * 0.5))  # Varies from ~70 to 140
         b = 0
-        colors.append(f'rgba({r}, {g}, {b}, 0.7)')
+        colors.append(f'rgba({r}, {g}, {b}, 0.8)')
 
     for i, idx in enumerate(top_indices):
         prob = probabilities[idx]
@@ -4062,14 +4062,14 @@ def plot_forecast_interactive(
             x=x_forecast,
             y=path,
             mode='lines',
-            name=f'Path #{i+1} (p={prob:.4f})',
+            name='High-Probability Paths',  # Same name for all - groups in legend
             line=dict(color=colors[i], width=width),
             hovertemplate=f'<b>Path #{i+1}</b><br>' +
                          f'Probability: {prob:.5f}<br>' +
                          f'Value: %{{y:.2f}}<br>' +
                          f'Final: {final_value:.2f}<extra></extra>',
             legendgroup='high_prob',
-            legendgrouptitle=dict(text='High-Probability Paths')
+            showlegend=(i == 0)  # Only show legend for first path
         ))
 
     # 4. Weighted forecast
