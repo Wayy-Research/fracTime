@@ -3425,6 +3425,218 @@ def process_symbol(
         traceback.print_exc()
         return None
 
+
+class FractalForecaster:
+    """
+    Unified fractal-based forecasting model.
+
+    Combines fractal analysis, pattern recognition, and regime detection
+    to create accurate time series forecasts.
+    """
+
+    def __init__(self, lookback: int = 252):
+        """
+        Initialize the forecaster.
+
+        Args:
+            lookback: Number of historical periods to use for analysis
+        """
+        self.lookback = lookback
+        self.analyzer = FractalAnalyzer()
+        self.simulator = None
+        self.prices_history = None
+        self.hurst = None
+        self.fractal_dim = None
+
+    def fit(self, prices: np.ndarray):
+        """
+        Fit the forecaster to historical data.
+
+        Args:
+            prices: Historical price series
+        """
+        prices = _ensure_numpy_array(prices)
+        self.prices_history = prices[-self.lookback:] if len(prices) > self.lookback else prices
+
+        # Analyze fractal properties
+        self.hurst = self.analyzer.compute_hurst(self.prices_history)
+        self.fractal_dim = self.analyzer.compute_fractal_dimension(self.prices_history)
+
+        # Initialize simulator
+        self.simulator = FractalSimulator(self.prices_history, self.analyzer)
+
+        return self
+
+    def predict(self, n_steps: int, n_paths: int = 1000, return_paths: bool = False):
+        """
+        Generate forecast.
+
+        Args:
+            n_steps: Number of steps ahead to forecast
+            n_paths: Number of scenarios to simulate
+            return_paths: If True, return all paths; if False, return median forecast
+
+        Returns:
+            If return_paths=False: forecast array (median of paths)
+            If return_paths=True: (forecast, paths, metadata)
+        """
+        if self.simulator is None:
+            raise ValueError("Model not fitted. Call fit() first.")
+
+        # Generate paths
+        paths, metadata = self.simulator.simulate_paths(
+            n_steps=n_steps,
+            n_paths=n_paths,
+            pattern_weight=0.4,
+            use_trading_time=True
+        )
+
+        # Calculate median forecast
+        forecast = np.median(paths, axis=0)
+
+        if return_paths:
+            return forecast, paths, metadata
+        return forecast
+
+    def forecast(self, n_steps: int, confidence: float = 0.95):
+        """
+        Generate forecast with confidence intervals.
+
+        Args:
+            n_steps: Number of steps ahead to forecast
+            confidence: Confidence level for intervals (default 0.95)
+
+        Returns:
+            Dictionary with 'forecast', 'lower', 'upper', 'std'
+        """
+        if self.simulator is None:
+            raise ValueError("Model not fitted. Call fit() first.")
+
+        # Generate many paths for robust estimates
+        paths, _ = self.simulator.simulate_paths(
+            n_steps=n_steps,
+            n_paths=2000,
+            pattern_weight=0.4,
+            use_trading_time=True
+        )
+
+        # Calculate statistics
+        alpha = (1 - confidence) / 2
+        lower_pct = alpha * 100
+        upper_pct = (1 - alpha) * 100
+
+        return {
+            'forecast': np.median(paths, axis=0),
+            'mean': np.mean(paths, axis=0),
+            'lower': np.percentile(paths, lower_pct, axis=0),
+            'upper': np.percentile(paths, upper_pct, axis=0),
+            'std': np.std(paths, axis=0)
+        }
+
+
+def plot_forecast(prices: np.ndarray,
+                 forecast: np.ndarray = None,
+                 paths: np.ndarray = None,
+                 confidence_intervals: dict = None,
+                 title: str = "Fractal Forecast",
+                 dates: np.ndarray = None,
+                 show_patterns: bool = False):
+    """
+    Simple, clean plotting function for forecasts.
+
+    Args:
+        prices: Historical price data
+        forecast: Point forecast (optional)
+        paths: Simulated paths array (optional, shape: n_paths x n_steps)
+        confidence_intervals: Dict with 'lower' and 'upper' bounds (optional)
+        title: Plot title
+        dates: Date array for x-axis (optional)
+        show_patterns: Show path distribution (default False)
+
+    Returns:
+        matplotlib figure
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    from datetime import datetime, timedelta
+
+    prices = _ensure_numpy_array(prices)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Prepare x-axis
+    n_hist = len(prices)
+    if dates is not None:
+        dates = _ensure_numpy_array(dates)
+        x_hist = dates[-n_hist:]
+
+        # Generate future dates
+        if forecast is not None or paths is not None:
+            n_forecast = len(forecast) if forecast is not None else paths.shape[1]
+            last_date = x_hist[-1]
+
+            if isinstance(last_date, (datetime, pd.Timestamp)):
+                x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+            else:
+                x_forecast = np.arange(n_forecast) + n_hist
+    else:
+        x_hist = np.arange(n_hist)
+        if forecast is not None or paths is not None:
+            n_forecast = len(forecast) if forecast is not None else paths.shape[1]
+            x_forecast = np.arange(n_forecast) + n_hist
+
+    # Plot historical prices
+    ax.plot(x_hist, prices, 'k-', linewidth=2, label='Historical', alpha=0.8)
+
+    # Plot paths if provided
+    if paths is not None:
+        paths = _ensure_numpy_array(paths)
+        if show_patterns:
+            # Show all paths with transparency
+            for i in range(min(100, len(paths))):
+                ax.plot(x_forecast, paths[i], 'b-', alpha=0.05, linewidth=0.5)
+        else:
+            # Show percentile bands
+            p10 = np.percentile(paths, 10, axis=0)
+            p90 = np.percentile(paths, 90, axis=0)
+            p25 = np.percentile(paths, 25, axis=0)
+            p75 = np.percentile(paths, 75, axis=0)
+
+            ax.fill_between(x_forecast, p10, p90, alpha=0.2, color='blue', label='80% Range')
+            ax.fill_between(x_forecast, p25, p75, alpha=0.3, color='blue', label='50% Range')
+
+    # Plot confidence intervals if provided
+    if confidence_intervals is not None:
+        lower = _ensure_numpy_array(confidence_intervals['lower'])
+        upper = _ensure_numpy_array(confidence_intervals['upper'])
+        ax.fill_between(x_forecast, lower, upper, alpha=0.3, color='green', label='95% CI')
+
+    # Plot forecast
+    if forecast is not None:
+        forecast = _ensure_numpy_array(forecast)
+        ax.plot(x_forecast, forecast, 'r-', linewidth=2, label='Forecast', alpha=0.8)
+
+        # Connect historical to forecast
+        ax.plot([x_hist[-1], x_forecast[0]], [prices[-1], forecast[0]],
+                'r--', linewidth=1, alpha=0.5)
+
+    # Formatting
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Price', fontsize=12)
+    ax.legend(loc='best', framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+
+    # Format dates if using datetime
+    if dates is not None and isinstance(x_hist[0], (datetime, pd.Timestamp)):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        fig.autofmt_xdate()
+
+    plt.tight_layout()
+    return fig
+
+
 # Example usage
 if __name__ == "__main__":
     # Get data

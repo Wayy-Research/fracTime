@@ -1,51 +1,35 @@
 """
 FracTime Forecasting Module
 
-This module contains various time series forecasting methods, including:
-- Traditional statistical methods (ARIMA, ETS, etc.)
-- Fractal forecasting methods (mentioned in the research paper)
-- Machine learning methods (Random Forest, XGBoost, etc.)
-- Neural network methods (LSTM, etc.)
+Core fractal-based forecasting methods.
+
+For most use cases, use the unified FractalForecaster from fractime.FractalForecaster
+which combines the best fractal techniques automatically.
 """
 
 from .base import BaseForecaster
-from .statistical import ARIMAForecaster, SARIMAForecaster, ExponentialSmoothingForecaster
+from .statistical import ARIMAForecaster, ExponentialSmoothingForecaster
 from .fractal import (
     StateTransitionFRSRForecaster,
     FractalProjectionForecaster,
-    FractalClassificationForecaster,
-    RescaledRangeForecaster,
-    FractalInterpolationForecaster,
-    FractalReductionForecaster
-)
-from .ml import (
-    RandomForestForecaster,
-    XGBoostForecaster,
-    SVRForecaster,
-    KNNForecaster
+    FractalClassificationForecaster
 )
 
-# Re-export everything
+# Re-export core classes
 __all__ = [
-    # Base classes
+    # Base class
     'BaseForecaster',
-    
-    # Statistical forecasters
+
+    # Statistical baselines (for comparison)
     'ARIMAForecaster',
-    'SARIMAForecaster',
     'ExponentialSmoothingForecaster',
-    
-    # Fractal forecasters
+
+    # Core fractal forecasters
     'StateTransitionFRSRForecaster',
     'FractalProjectionForecaster',
-    'FractalClassificationForecaster',
-    'RescaledRangeForecaster',
-    'FractalInterpolationForecaster',
-    'FractalReductionForecaster',
-    
-    # Machine learning forecasters
-    'RandomForestForecaster',
-    'XGBoostForecaster',
-    'SVRForecaster',
-    'KNNForecaster'
+    'FractalClassificationForecaster'
 ]
+
+# NOTE: For most use cases, use fractime.FractalForecaster instead
+# of these individual forecasters. The unified forecaster combines
+# fractal analysis, pattern recognition, and regime detection automatically.
