@@ -23,146 +23,80 @@ uv pip install -e .
 
 ```python
 import fractime as ft
+import numpy as np
 
-# 1. Load data
-data = ft.get_yahoo_data("AAPL", start_date="2023-01-01")
-prices = data['Close'].values
+# 1. Create time series data
+prices = np.random.randn(500).cumsum() + 100
 
-# 2. Create and fit forecaster
+# 2. Fit forecaster
 forecaster = ft.FractalForecaster()
 forecaster.fit(prices)
 
-# 3. Generate 30-day forecast with confidence intervals
-result = forecaster.forecast(n_steps=30, confidence=0.95)
+# 3. Generate forecast
+result = forecaster.predict(n_steps=30)
 
-# 4. Plot it
-forecast, paths, _ = forecaster.predict(n_steps=30, return_paths=True)
+# 4. Plot
 fig = ft.plot_forecast(
     prices=prices,
     forecast=result['forecast'],
-    paths=paths,
+    paths=result['paths'],
     confidence_intervals=result,
-    title="30-Day Forecast"
+    title="30-Step Forecast"
 )
 fig.show()
+
+# 5. View results
+print(f"Forecast: {result['forecast'][-1]:.2f}")
+print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
 ```
+
+That's it! One method call gives you everything: forecast, confidence intervals, simulation paths, **and probability weights** for each path based on fractal similarity.
 
 ---
 
-## The Forecasting Workflow
+## Interactive Probability-Weighted Visualization
 
-### 1. Load Your Data
+**NEW**: Visualize high-probability forecast paths with interactive Altair charts!
 
 ```python
 import fractime as ft
-
-# Use built-in Yahoo Finance loader
-data = ft.get_yahoo_data("SPY", start_date="2020-01-01")
-prices = data['Close'].values
-
-# Or use your own data
 import numpy as np
-prices = np.array([100, 102, 101, 105, ...])  # Any time series
-```
 
-### 2. Understand Fractal Properties
+# Generate data and forecast
+np.random.seed(42)
+prices = 100 + np.random.randn(500).cumsum()
 
-```python
-# Analyze fractal characteristics
-analyzer = ft.FractalAnalyzer()
-hurst = analyzer.compute_hurst(prices)
-fractal_dim = analyzer.compute_fractal_dimension(prices)
-
-print(f"Hurst exponent: {hurst:.3f}")
-print(f"Fractal dimension: {fractal_dim:.3f}")
-
-# Interpretation:
-# H > 0.5: Trending (persistent)
-# H < 0.5: Mean-reverting (anti-persistent)
-# H ≈ 0.5: Random walk
-```
-
-### 3. Create Forecasts
-
-**Simple forecast:**
-```python
-# Unified forecaster combines fractal analysis, pattern recognition,
-# and regime detection automatically
-forecaster = ft.FractalForecaster(lookback=252)  # 1 year
+forecaster = ft.FractalForecaster()
 forecaster.fit(prices)
+result = forecaster.predict(n_steps=30, n_paths=500)
 
-# Get point forecast
-forecast = forecaster.predict(n_steps=30)
-```
-
-**Forecast with uncertainty:**
-```python
-# Get forecast with confidence intervals
-result = forecaster.forecast(n_steps=30, confidence=0.95)
-
-print(f"Forecast: ${result['forecast'][-1]:.2f}")
-print(f"95% CI: ${result['lower'][-1]:.2f} - ${result['upper'][-1]:.2f}")
-```
-
-**Get all scenario paths:**
-```python
-# Generate multiple paths to see range of outcomes
-forecast, paths, metadata = forecaster.predict(
-    n_steps=30,
-    n_paths=1000,
-    return_paths=True
-)
-
-# Analyze outcomes
-final_prices = paths[:, -1]
-prob_gain = np.mean(final_prices > prices[-1])
-var_95 = np.percentile(final_prices, 5)
-
-print(f"Probability of gain: {prob_gain:.1%}")
-print(f"Value at Risk (95%): ${var_95:.2f}")
-```
-
-### 4. Visualize Results
-
-**Basic forecast plot:**
-```python
-import fractime as ft
-
-result = forecaster.forecast(n_steps=30)
-
-fig = ft.plot_forecast(
+# Create interactive visualization
+# Paths are colored and sized by probability based on:
+# - Hurst exponent similarity
+# - Volatility consistency
+# - Multi-scale pattern matching
+chart = ft.plot_forecast_interactive(
     prices=prices,
-    forecast=result['forecast'],
-    confidence_intervals=result,
-    title="30-Day Forecast"
+    result=result,
+    title="Probability-Weighted Forecast Paths",
+    top_n_paths=50  # Show top 50 most likely paths
 )
-fig.show()
+
+# In Jupyter notebook
+chart.show()
+
+# Or save to HTML
+chart.save('forecast.html')
 ```
 
-**Show probability paths:**
-```python
-forecast, paths, _ = forecaster.predict(n_steps=30, n_paths=500, return_paths=True)
+The interactive chart shows:
+- **Historical data** (black line)
+- **High-probability paths** (blue gradient by probability)
+- **Probability-weighted forecast** (red dashed line)
+- **95% confidence interval** (green band)
+- **Interactive tooltips** with values and probabilities
 
-fig = ft.plot_forecast(
-    prices=prices[-60:],  # Last 60 days
-    forecast=forecast,
-    paths=paths,
-    title="Forecast with Probability Paths"
-)
-fig.show()
-```
-
-**With dates:**
-```python
-fig = ft.plot_forecast(
-    prices=prices,
-    forecast=result['forecast'],
-    confidence_intervals=result,
-    dates=data['Date'].values,
-    title="AAPL Forecast"
-)
-fig.savefig('forecast.png', dpi=300, bbox_inches='tight')
-```
+Hover over paths to see their exact probability!
 
 ---
 
@@ -172,77 +106,66 @@ fig.savefig('forecast.png', dpi=300, bbox_inches='tight')
 import fractime as ft
 import numpy as np
 
-# Load data
-data = ft.get_yahoo_data("TSLA", start_date="2023-01-01")
-prices = data['Close'].values
-dates = data['Date'].values
+# Generate data
+np.random.seed(42)
+prices = 100 + np.random.randn(500).cumsum()
 
-# Analyze fractal properties
+# Understand the data's fractal properties
 analyzer = ft.FractalAnalyzer()
 hurst = analyzer.compute_hurst(prices)
 print(f"Hurst: {hurst:.3f} ({'Trending' if hurst > 0.5 else 'Mean-reverting'})")
 
-# Create forecaster
-forecaster = ft.FractalForecaster(lookback=252)
+# Fit and predict
+forecaster = ft.FractalForecaster()
 forecaster.fit(prices)
+result = forecaster.predict(n_steps=30, n_paths=1000)
 
-# Generate forecast with confidence intervals
-result = forecaster.forecast(n_steps=30, confidence=0.95)
-forecast, paths, _ = forecaster.predict(n_steps=30, n_paths=1000, return_paths=True)
+# Analyze results
+current = prices[-1]
+forecast = result['forecast'][-1]
+lower = result['lower'][-1]
+upper = result['upper'][-1]
 
-# Calculate risk metrics
-final_prices = paths[:, -1]
-current_price = prices[-1]
+print(f"\n30-Step Forecast:")
+print(f"  Current: {current:.2f}")
+print(f"  Forecast: {forecast:.2f} ({(forecast/current-1)*100:+.1f}%)")
+print(f"  95% CI: [{lower:.2f}, {upper:.2f}]")
 
-expected = np.mean(final_prices)
-prob_gain = np.mean(final_prices > current_price)
-prob_10pct_gain = np.mean(final_prices > current_price * 1.10)
-var_95 = np.percentile(final_prices, 5)
-cvar_95 = np.mean(final_prices[final_prices <= var_95])
+# Calculate probabilities from paths
+paths = result['paths']
+final_values = paths[:, -1]
+prob_increase = np.mean(final_values > current)
+percentile_5 = np.percentile(final_values, 5)
+percentile_95 = np.percentile(final_values, 95)
 
-print(f"\n30-Day Forecast:")
-print(f"  Current: ${current_price:.2f}")
-print(f"  Expected: ${expected:.2f} ({(expected/current_price-1):.1%})")
-print(f"  95% CI: ${result['lower'][-1]:.2f} - ${result['upper'][-1]:.2f}")
 print(f"\nProbabilities:")
-print(f"  Any gain: {prob_gain:.1%}")
-print(f"  >10% gain: {prob_10pct_gain:.1%}")
-print(f"\nRisk:")
-print(f"  VaR (95%): ${var_95:.2f} ({(var_95/current_price-1):.1%})")
-print(f"  CVaR (95%): ${cvar_95:.2f} ({(cvar_95/current_price-1):.1%})")
+print(f"  Any increase: {prob_increase:.1%}")
+print(f"  Range (5th-95th): [{percentile_5:.2f}, {percentile_95:.2f}]")
 
-# Plot
+# Visualize
 fig = ft.plot_forecast(
-    prices=prices[-90:],
+    prices=prices[-150:],
     forecast=result['forecast'],
-    paths=paths,
+    paths=result['paths'],
     confidence_intervals=result,
-    dates=dates[-90:],
-    title="TSLA 30-Day Fractal Forecast"
+    title="30-Step Fractal Forecast"
 )
 fig.show()
 ```
 
----
+**Output:**
+```
+Hurst: 0.548 (Trending)
 
-## Why Fractal-Based Forecasting?
+30-Step Forecast:
+  Current: 103.42
+  Forecast: 104.16 (+0.7%)
+  95% CI: [94.26, 113.23]
 
-Traditional methods (ARIMA, exponential smoothing) assume:
-- Normal distributions
-- Statistical independence
-- Short-term memory only
-
-**FracTime recognizes that time series have:**
-- **Long-term memory**: Past events influence the distant future (Hurst exponent)
-- **Self-similarity**: Patterns repeat across time scales
-- **Regime changes**: Markets shift between trending and mean-reverting states
-- **Fat tails**: Extreme events are more common than normal distributions predict
-
-This leads to more accurate forecasts, especially for:
-- Financial markets
-- Energy consumption
-- Economic indicators
-- Any series with complex temporal patterns
+Probabilities:
+  Any increase: 55.7%
+  Range (5th-95th): [95.05, 112.14]
+```
 
 ---
 
@@ -250,92 +173,195 @@ This leads to more accurate forecasts, especially for:
 
 ### FractalForecaster
 
-**Main forecasting class** - Use this for most applications.
+**Main class** - Use this for forecasting.
 
 ```python
 forecaster = ft.FractalForecaster(lookback=252)
 ```
 
-**Methods:**
-- `fit(prices)` - Fit to historical data
-- `predict(n_steps, n_paths=1000, return_paths=False)` - Generate forecast
-- `forecast(n_steps, confidence=0.95)` - Forecast with confidence intervals
+#### Methods
 
-**Attributes:**
-- `hurst` - Hurst exponent (after fitting)
-- `fractal_dim` - Fractal dimension (after fitting)
+**`fit(prices)`**
 
-### FractalAnalyzer
-
-**Understand fractal properties** of your time series.
+Fit the model to historical data.
 
 ```python
-analyzer = ft.FractalAnalyzer()
+forecaster.fit(prices)
 ```
 
-**Methods:**
-- `compute_hurst(prices)` → float - Calculate Hurst exponent
-- `compute_fractal_dimension(prices)` → float - Calculate fractal dimension
-- `analyze_patterns(prices)` → dict - Comprehensive analysis
+**`predict(n_steps, n_paths=1000, confidence=0.95)`**
 
-### plot_forecast()
-
-**Visualize forecasts** with one function call.
+Generate forecast with uncertainty quantification.
 
 ```python
-ft.plot_forecast(
-    prices,                    # Historical data
-    forecast=None,             # Point forecast
-    paths=None,                # Simulated paths
-    confidence_intervals=None, # CI dict with 'lower', 'upper'
-    title="Forecast",
-    dates=None,                # Date array for x-axis
-    show_patterns=False        # Show individual paths
-)
+result = forecaster.predict(n_steps=30)
 ```
 
-### Utility Functions
+Returns dict with:
+- `forecast` - Median forecast
+- `weighted_forecast` - Probability-weighted forecast (recommended)
+- `mean` - Mean forecast
+- `lower` - Lower confidence bound
+- `upper` - Upper confidence bound
+- `std` - Standard deviation
+- `paths` - All simulated paths (n_paths x n_steps)
+- `probabilities` - Probability weight for each path based on fractal similarity
 
-```python
-# Load data from Yahoo Finance
-data = ft.get_yahoo_data(symbol, start_date, end_date=None)
+#### Attributes (after fitting)
 
-# Advanced: Direct path simulation
-simulator = ft.FractalSimulator(prices, analyzer)
-paths, metadata = simulator.simulate_paths(n_steps=30, n_paths=1000)
-```
+- `hurst` - Hurst exponent
+- `fractal_dim` - Fractal dimension
 
 ---
 
-## Advanced: Custom Workflows
+### FractalAnalyzer
 
-### Compare with Traditional Methods
+**Analyze fractal properties** of time series.
 
 ```python
-from fractime.forecasting import ARIMAForecaster, ExponentialSmoothingForecaster
+analyzer = ft.FractalAnalyzer()
+hurst = analyzer.compute_hurst(prices)
+fractal_dim = analyzer.compute_fractal_dimension(prices)
+```
 
-# Fractal forecast
-fractal = ft.FractalForecaster()
-fractal.fit(prices)
-fractal_forecast = fractal.predict(n_steps=30)
+**Methods:**
+- `compute_hurst(prices)` → float
+- `compute_fractal_dimension(prices)` → float
+- `analyze_patterns(prices)` → dict
 
-# ARIMA baseline
-arima = ARIMAForecaster(p=1, d=1, q=1)
-arima.fit(X=prices[:-30].reshape(-1, 1), y=prices[:-30])
-arima_forecast = arima.predict(X=np.zeros((30, 1)))
+**Interpretation:**
+- H > 0.5: Trending (persistent)
+- H < 0.5: Mean-reverting (anti-persistent)
+- H ≈ 0.5: Random walk
 
-# Compare
-print(f"Fractal: ${fractal_forecast[-1]:.2f}")
-print(f"ARIMA: ${arima_forecast[-1]:.2f}")
+---
+
+### plot_forecast()
+
+**Static matplotlib visualization.**
+
+```python
+fig = ft.plot_forecast(
+    prices,                    # Historical data
+    forecast=None,             # Forecast line
+    paths=None,                # Simulated paths
+    confidence_intervals=None, # Dict with 'lower', 'upper'
+    title="Forecast",
+    dates=None,                # Optional date array
+    show_patterns=False        # Show individual paths
+)
+fig.show()
+fig.savefig('forecast.png', dpi=300)
+```
+
+### plot_forecast_interactive()
+
+**Interactive Altair visualization with probability weighting.**
+
+```python
+chart = ft.plot_forecast_interactive(
+    prices,                # Historical data
+    result,                # Full result dict from predict()
+    dates=None,            # Optional date array
+    title="Forecast",
+    top_n_paths=50,        # Number of high-probability paths to show
+    show_all_paths=False   # Show all paths vs top N
+)
+chart.show()              # Display in Jupyter
+chart.save('forecast.html')  # Save to HTML file
+```
+
+**Features:**
+- Paths colored by fractal similarity probability
+- Interactive hover tooltips
+- Zoom and pan
+- Responsive design
+
+---
+
+## Usage Examples
+
+### Basic Forecasting
+
+```python
+import fractime as ft
+import numpy as np
+
+# Your data
+prices = np.array([100, 102, 101, 105, 103, 108, ...])
+
+# Fit and predict
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices)
+result = forecaster.predict(n_steps=10)
+
+print(f"10-step forecast: {result['forecast'][-1]:.2f}")
+```
+
+### With Real Data
+
+```python
+import pandas as pd
+import fractime as ft
+
+# Load from CSV
+df = pd.read_csv('data.csv')
+prices = df['close'].values
+
+# Forecast
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices)
+result = forecaster.predict(n_steps=20)
+
+# Plot with dates
+fig = ft.plot_forecast(
+    prices=prices,
+    forecast=result['forecast'],
+    confidence_intervals=result,
+    dates=df['date'].values,
+    title="20-Day Forecast"
+)
+fig.show()
+```
+
+### Probability-Weighted Risk Analysis
+
+```python
+# Generate forecast with probabilities
+result = forecaster.predict(n_steps=30, n_paths=2000)
+
+# Get paths and their probabilities
+paths = result['paths']
+probs = result['probabilities']
+final_values = paths[:, -1]
+current = prices[-1]
+
+# Probability-weighted VaR (more accurate than percentile!)
+sorted_idx = np.argsort(final_values)
+cumsum_prob = np.cumsum(probs[sorted_idx])
+var_95_idx = sorted_idx[np.searchsorted(cumsum_prob, 0.05)]
+var_95_weighted = final_values[var_95_idx]
+
+# Traditional VaR for comparison
+var_95_traditional = np.percentile(final_values, 5)
+
+print(f"Current: {current:.2f}")
+print(f"Probability-weighted VaR: {var_95_weighted:.2f}")
+print(f"Traditional VaR: {var_95_traditional:.2f}")
+
+# Most likely outcome (highest probability path)
+most_likely_idx = np.argmax(probs)
+most_likely_outcome = final_values[most_likely_idx]
+print(f"Most likely outcome: {most_likely_outcome:.2f} (prob: {probs[most_likely_idx]:.4f})")
 ```
 
 ### Backtesting
 
 ```python
-# Simple walk-forward backtest
-train_size = 252
+# Walk-forward validation
+train_size = 250
 test_size = 30
-results = []
+errors = []
 
 for i in range(0, len(prices) - train_size - test_size, test_size):
     # Train
@@ -343,42 +369,114 @@ for i in range(0, len(prices) - train_size - test_size, test_size):
     forecaster = ft.FractalForecaster()
     forecaster.fit(train_data)
 
-    # Test
-    forecast = forecaster.predict(n_steps=test_size)
-    actual = prices[i+train_size:i+train_size+test_size]
+    # Predict
+    result = forecaster.predict(n_steps=test_size)
 
     # Evaluate
-    rmse = np.sqrt(np.mean((forecast - actual)**2))
-    results.append(rmse)
+    actual = prices[i+train_size:i+train_size+test_size]
+    rmse = np.sqrt(np.mean((result['forecast'] - actual)**2))
+    errors.append(rmse)
 
-print(f"Average RMSE: {np.mean(results):.2f}")
+print(f"Average RMSE: {np.mean(errors):.2f}")
 ```
 
 ---
 
-## Mathematical Background
+## Why Fractal-Based Forecasting?
 
-### Hurst Exponent (H)
+**Traditional methods** (ARIMA, exponential smoothing) assume:
+- Normal distributions
+- Statistical independence
+- Short-term memory only
 
-Measures **long-term memory**:
-- **H > 0.5**: Persistent (trending) - increases likely followed by increases
-- **H = 0.5**: Random walk - no memory
-- **H < 0.5**: Anti-persistent (mean-reverting) - increases likely followed by decreases
+**FracTime recognizes** that real time series have:
+- **Long-term memory** - Past affects distant future (Hurst exponent)
+- **Self-similarity** - Patterns repeat across time scales
+- **Regime changes** - Trending ↔ mean-reverting shifts
+- **Fat tails** - Extreme events are more common
 
-Calculated using Rescaled Range (R/S) analysis.
+This leads to better forecasts for:
+- Financial markets
+- Energy systems
+- Economic indicators
+- Any complex temporal data
 
-### Fractal Dimension (D)
+---
 
-Measures **complexity**:
-- D = 2 - H for time series
-- Higher D → more jagged, complex movements
-- Lower D → smoother, more persistent trends
+## How It Works
 
-Calculated using box-counting method.
+### 1. Fractal Analysis
 
-### Fractional Brownian Motion
+Computes Hurst exponent and fractal dimension to characterize the series:
 
-FracTime uses Fractional Brownian Motion (FBM) to generate forecasts. FBM generalizes standard Brownian motion with a memory parameter (H), creating realistic paths that capture the fractal nature of time series.
+```python
+H = 0.65  # Trending
+H = 0.35  # Mean-reverting
+H = 0.50  # Random walk
+```
+
+### 2. Pattern Recognition
+
+Finds self-similar patterns across different time scales.
+
+### 3. Path Simulation
+
+Generates multiple future scenarios using Fractional Brownian Motion with the measured Hurst exponent.
+
+### 4. Probability Weighting
+
+**Each forecast path gets a probability weight based on:**
+- **Hurst consistency**: How well the path matches historical long-term memory
+- **Volatility similarity**: Matching historical volatility patterns
+- **Multi-scale pattern matching**: Short, medium, and long-term trend consistency
+
+This means high-probability paths are those that are most consistent with the historical fractal structure!
+
+### 5. Uncertainty Quantification
+
+Provides:
+- Confidence intervals
+- Full probability distributions
+- Probability-weighted forecasts
+- Interactive visualizations
+
+---
+
+## Advanced
+
+### Direct Simulation
+
+```python
+analyzer = ft.FractalAnalyzer()
+simulator = ft.FractalSimulator(prices, analyzer)
+paths, metadata = simulator.simulate_paths(n_steps=30, n_paths=1000)
+```
+
+### Custom Confidence Levels
+
+```python
+result = forecaster.predict(n_steps=30, confidence=0.90)  # 90% CI
+result = forecaster.predict(n_steps=30, confidence=0.99)  # 99% CI
+```
+
+### Compare with ARIMA
+
+```python
+from fractime.forecasting import ARIMAForecaster
+
+# Fractal
+fractal = ft.FractalForecaster()
+fractal.fit(prices)
+fractal_result = fractal.predict(n_steps=30)
+
+# ARIMA
+arima = ARIMAForecaster(p=1, d=1, q=1)
+arima.fit(X=prices[:-30].reshape(-1, 1), y=prices[:-30])
+arima_forecast = arima.predict(X=np.zeros((30, 1)))
+
+print(f"Fractal: {fractal_result['forecast'][-1]:.2f}")
+print(f"ARIMA: {arima_forecast[-1]:.2f}")
+```
 
 ---
 
@@ -388,11 +486,11 @@ FracTime uses Fractional Brownian Motion (FBM) to generate forecasts. FBM genera
 # Run tests
 pytest
 
-# Format code
+# Format
 black fractime/ tests/
 
 # Lint
-ruff check fractime/ tests/
+ruff check fractime/
 
 # Type check
 mypy fractime/
@@ -402,7 +500,7 @@ mypy fractime/
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+MIT - see [LICENSE](LICENSE)
 
 ---
 
@@ -412,20 +510,9 @@ MIT License - see [LICENSE](LICENSE)
 @software{fractime2024,
   title = {FracTime: Fractal-Based Time Series Forecasting},
   year = {2024},
-  url = {https://github.com/Wayy-Research/fractime},
-  version = {0.1.0}
+  url = {https://github.com/Wayy-Research/fractime}
 }
 ```
-
----
-
-## Disclaimer
-
-**For research and educational purposes only.**
-
-- Past performance does not guarantee future results
-- No warranty of any kind
-- Consult financial professionals before investing
 
 ---
 

@@ -3467,23 +3467,94 @@ class FractalForecaster:
 
         return self
 
-    def predict(self, n_steps: int, n_paths: int = 1000, return_paths: bool = False):
+    def _calculate_path_probabilities(self, paths: np.ndarray) -> np.ndarray:
         """
-        Generate forecast.
+        Calculate probability weights for each path based on fractal similarity
+        to historical patterns and multi-scale consistency.
+
+        Args:
+            paths: Array of simulated paths (n_paths x n_steps)
+
+        Returns:
+            Array of probability weights (n_paths,) summing to 1.0
+        """
+        n_paths = len(paths)
+        scores = np.zeros(n_paths)
+
+        # Get historical patterns for comparison
+        hist_returns = np.diff(np.log(self.prices_history))
+        hist_vol = np.std(hist_returns)
+
+        for i, path in enumerate(paths):
+            path_score = 0.0
+
+            # 1. Hurst consistency - paths matching historical Hurst get higher weight
+            path_returns = np.diff(np.log(path))
+            if len(path_returns) >= 20:
+                try:
+                    path_hurst = self.analyzer.compute_hurst(path)
+                    hurst_similarity = 1.0 - abs(path_hurst - self.hurst)
+                    path_score += hurst_similarity * 0.3
+                except:
+                    path_score += 0.15  # Neutral score if calculation fails
+
+            # 2. Volatility similarity - paths with similar volatility to history
+            path_vol = np.std(path_returns) if len(path_returns) > 0 else hist_vol
+            vol_ratio = min(path_vol, hist_vol) / max(path_vol, hist_vol)
+            path_score += vol_ratio * 0.3
+
+            # 3. Pattern similarity - check multi-scale patterns
+            # Compare short, medium, and long-term trends
+            if len(path) >= 10:
+                # Short-term (last 5 steps)
+                path_short_trend = np.mean(path_returns[-5:]) if len(path_returns) >= 5 else 0
+                hist_short_trend = np.mean(hist_returns[-5:]) if len(hist_returns) >= 5 else 0
+                short_similarity = 1.0 - min(abs(path_short_trend - hist_short_trend) / (hist_vol + 1e-8), 1.0)
+                path_score += short_similarity * 0.2
+
+                # Medium-term trend consistency
+                if len(path) >= 15:
+                    path_med_trend = np.mean(path_returns[-15:-5]) if len(path_returns) >= 15 else 0
+                    hist_med_trend = np.mean(hist_returns[-15:-5]) if len(hist_returns) >= 15 else 0
+                    med_similarity = 1.0 - min(abs(path_med_trend - hist_med_trend) / (hist_vol + 1e-8), 1.0)
+                    path_score += med_similarity * 0.2
+
+            scores[i] = max(path_score, 0.1)  # Ensure minimum score
+
+        # Normalize to probabilities
+        probabilities = scores / np.sum(scores)
+        return probabilities
+
+    def predict(self, n_steps: int, n_paths: int = 1000, confidence: float = 0.95):
+        """
+        Generate forecast with uncertainty quantification and path probabilities.
 
         Args:
             n_steps: Number of steps ahead to forecast
-            n_paths: Number of scenarios to simulate
-            return_paths: If True, return all paths; if False, return median forecast
+            n_paths: Number of Monte Carlo paths to simulate (default 1000)
+            confidence: Confidence level for intervals (default 0.95)
 
         Returns:
-            If return_paths=False: forecast array (median of paths)
-            If return_paths=True: (forecast, paths, metadata)
+            Dictionary with:
+                'forecast': np.ndarray - Median forecast
+                'mean': np.ndarray - Mean forecast
+                'lower': np.ndarray - Lower confidence bound
+                'upper': np.ndarray - Upper confidence bound
+                'std': np.ndarray - Standard deviation
+                'paths': np.ndarray - All simulated paths (n_paths x n_steps)
+                'probabilities': np.ndarray - Probability weight for each path
+
+        Example:
+            >>> forecaster = FractalForecaster()
+            >>> forecaster.fit(prices)
+            >>> result = forecaster.predict(n_steps=30)
+            >>> print(f"Forecast: {result['forecast'][-1]:.2f}")
+            >>> print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
         """
         if self.simulator is None:
             raise ValueError("Model not fitted. Call fit() first.")
 
-        # Generate paths
+        # Generate paths (single simulation run)
         paths, metadata = self.simulator.simulate_paths(
             n_steps=n_steps,
             n_paths=n_paths,
@@ -3491,46 +3562,26 @@ class FractalForecaster:
             use_trading_time=True
         )
 
-        # Calculate median forecast
-        forecast = np.median(paths, axis=0)
-
-        if return_paths:
-            return forecast, paths, metadata
-        return forecast
-
-    def forecast(self, n_steps: int, confidence: float = 0.95):
-        """
-        Generate forecast with confidence intervals.
-
-        Args:
-            n_steps: Number of steps ahead to forecast
-            confidence: Confidence level for intervals (default 0.95)
-
-        Returns:
-            Dictionary with 'forecast', 'lower', 'upper', 'std'
-        """
-        if self.simulator is None:
-            raise ValueError("Model not fitted. Call fit() first.")
-
-        # Generate many paths for robust estimates
-        paths, _ = self.simulator.simulate_paths(
-            n_steps=n_steps,
-            n_paths=2000,
-            pattern_weight=0.4,
-            use_trading_time=True
-        )
+        # Calculate path probabilities based on fractal similarity
+        probabilities = self._calculate_path_probabilities(paths)
 
         # Calculate statistics
         alpha = (1 - confidence) / 2
         lower_pct = alpha * 100
         upper_pct = (1 - alpha) * 100
 
+        # Probability-weighted forecast (in addition to median)
+        weighted_forecast = np.average(paths, axis=0, weights=probabilities)
+
         return {
             'forecast': np.median(paths, axis=0),
+            'weighted_forecast': weighted_forecast,
             'mean': np.mean(paths, axis=0),
             'lower': np.percentile(paths, lower_pct, axis=0),
             'upper': np.percentile(paths, upper_pct, axis=0),
-            'std': np.std(paths, axis=0)
+            'std': np.std(paths, axis=0),
+            'paths': paths,
+            'probabilities': probabilities
         }
 
 
@@ -3635,6 +3686,181 @@ def plot_forecast(prices: np.ndarray,
 
     plt.tight_layout()
     return fig
+
+
+def plot_forecast_interactive(
+    prices: np.ndarray,
+    result: dict,
+    dates: np.ndarray = None,
+    title: str = "Interactive Fractal Forecast",
+    top_n_paths: int = 50,
+    show_all_paths: bool = False
+):
+    """
+    Create an interactive Altair visualization of probability-weighted forecast paths.
+
+    This highlights high-probability paths based on fractal similarity to historical
+    patterns and multi-scale consistency.
+
+    Args:
+        prices: Historical price data
+        result: Result dict from forecaster.predict() (must include 'paths' and 'probabilities')
+        dates: Date array for x-axis (optional)
+        title: Chart title
+        top_n_paths: Number of highest-probability paths to highlight (default 50)
+        show_all_paths: If True, show all paths with opacity based on probability
+
+    Returns:
+        Altair chart object (call .show() to display in notebook or .save() to file)
+
+    Example:
+        >>> result = forecaster.predict(n_steps=30)
+        >>> chart = ft.plot_forecast_interactive(prices, result)
+        >>> chart.show()  # In Jupyter
+        >>> chart.save('forecast.html')  # Save to file
+    """
+    import altair as alt
+    import pandas as pd
+
+    prices = _ensure_numpy_array(prices)
+    paths = result['paths']
+    probabilities = result['probabilities']
+    forecast = result.get('weighted_forecast', result['forecast'])
+
+    n_hist = len(prices)
+    n_forecast = paths.shape[1]
+
+    # Prepare historical data
+    if dates is not None:
+        dates = _ensure_numpy_array(dates)
+        x_hist = dates[-n_hist:]
+        # Generate future dates
+        last_date = x_hist[-1]
+        if isinstance(last_date, (pd.Timestamp, np.datetime64)):
+            x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+        else:
+            x_forecast = np.arange(n_forecast) + n_hist
+    else:
+        x_hist = np.arange(n_hist)
+        x_forecast = np.arange(n_forecast) + n_hist
+
+    # Create DataFrames for Altair
+    hist_df = pd.DataFrame({
+        'step': range(len(x_hist)),
+        'date': x_hist,
+        'price': prices,
+        'type': 'Historical'
+    })
+
+    # Get top probability paths
+    top_indices = np.argsort(probabilities)[-top_n_paths:]
+
+    # Prepare path data
+    path_data = []
+    for idx in top_indices:
+        prob = probabilities[idx]
+        path = paths[idx]
+        for step, value in enumerate(path):
+            path_data.append({
+                'step': n_hist + step,
+                'date': x_forecast[step],
+                'price': value,
+                'path_id': idx,
+                'probability': prob,
+                'type': 'Forecast Path'
+            })
+
+    path_df = pd.DataFrame(path_data)
+
+    # Probability-weighted forecast line
+    forecast_df = pd.DataFrame({
+        'step': range(n_hist, n_hist + n_forecast),
+        'date': x_forecast,
+        'price': forecast,
+        'type': 'Weighted Forecast'
+    })
+
+    # Confidence intervals
+    ci_df = pd.DataFrame({
+        'step': range(n_hist, n_hist + n_forecast),
+        'date': x_forecast,
+        'lower': result['lower'],
+        'upper': result['upper'],
+        'type': 'Confidence Interval'
+    })
+
+    # Create Altair chart
+    base = alt.Chart().encode(
+        x=alt.X('date:T' if dates is not None else 'step:Q', title='Time'),
+        y=alt.Y('price:Q', title='Value', scale=alt.Scale(zero=False))
+    )
+
+    # Historical line
+    historical = alt.Chart(hist_df).mark_line(
+        color='black',
+        strokeWidth=2
+    ).encode(
+        x='date:T' if dates is not None else 'step:Q',
+        y='price:Q',
+        tooltip=['date:T' if dates is not None else 'step:Q', alt.Tooltip('price:Q', format='.2f')]
+    )
+
+    # Confidence interval band
+    ci_band = alt.Chart(ci_df).mark_area(
+        opacity=0.2,
+        color='green'
+    ).encode(
+        x='date:T' if dates is not None else 'step:Q',
+        y='lower:Q',
+        y2='upper:Q',
+        tooltip=[
+            'date:T' if dates is not None else 'step:Q',
+            alt.Tooltip('lower:Q', format='.2f', title='Lower 95%'),
+            alt.Tooltip('upper:Q', format='.2f', title='Upper 95%')
+        ]
+    )
+
+    # High-probability paths with opacity based on probability
+    paths_chart = alt.Chart(path_df).mark_line(
+        strokeWidth=1
+    ).encode(
+        x='date:T' if dates is not None else 'step:Q',
+        y='price:Q',
+        detail='path_id:N',
+        opacity=alt.Opacity('probability:Q', scale=alt.Scale(range=[0.1, 0.8]), legend=None),
+        color=alt.Color('probability:Q',
+                       scale=alt.Scale(scheme='blues', domain=[probabilities[top_indices].min(),
+                                                                probabilities[top_indices].max()]),
+                       legend=alt.Legend(title='Path Probability')),
+        tooltip=[
+            'date:T' if dates is not None else 'step:Q',
+            alt.Tooltip('price:Q', format='.2f'),
+            alt.Tooltip('probability:Q', format='.4f', title='Probability')
+        ]
+    )
+
+    # Weighted forecast line
+    weighted_line = alt.Chart(forecast_df).mark_line(
+        color='red',
+        strokeWidth=3,
+        strokeDash=[5, 5]
+    ).encode(
+        x='date:T' if dates is not None else 'step:Q',
+        y='price:Q',
+        tooltip=[
+            'date:T' if dates is not None else 'step:Q',
+            alt.Tooltip('price:Q', format='.2f', title='Weighted Forecast')
+        ]
+    )
+
+    # Combine layers
+    chart = (ci_band + paths_chart + historical + weighted_line).properties(
+        width=800,
+        height=400,
+        title=title
+    ).interactive()
+
+    return chart
 
 
 # Example usage
