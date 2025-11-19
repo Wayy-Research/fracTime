@@ -3445,18 +3445,62 @@ class FractalForecaster:
         self.analyzer = FractalAnalyzer()
         self.simulator = None
         self.prices_history = None
+        self.dates_history = None
+        self.frequency = None
         self.hurst = None
         self.fractal_dim = None
 
-    def fit(self, prices: np.ndarray):
+    def _infer_frequency(self, dates: np.ndarray) -> str:
+        """
+        Infer the frequency of the time series from dates.
+
+        Args:
+            dates: Array of datetime objects or strings
+
+        Returns:
+            Frequency string ('D', 'H', 'min', etc.)
+        """
+        from datetime import datetime
+        import pandas as pd
+
+        # Convert to pandas DatetimeIndex for easy frequency detection
+        if isinstance(dates[0], str):
+            dates_pd = pd.to_datetime(dates)
+        else:
+            dates_pd = pd.DatetimeIndex(dates)
+
+        # Infer frequency
+        freq = pd.infer_freq(dates_pd)
+        if freq is None:
+            # Manual detection if infer_freq fails
+            diff = dates_pd[1] - dates_pd[0]
+            if diff.total_seconds() < 3600:
+                return 'min'
+            elif diff.total_seconds() < 86400:
+                return 'H'
+            else:
+                return 'D'
+        return freq
+
+    def fit(self, prices: np.ndarray, dates: np.ndarray = None):
         """
         Fit the forecaster to historical data.
 
         Args:
             prices: Historical price series
+            dates: Optional datetime array matching prices length
         """
         prices = _ensure_numpy_array(prices)
         self.prices_history = prices[-self.lookback:] if len(prices) > self.lookback else prices
+
+        # Handle dates if provided
+        if dates is not None:
+            dates = _ensure_numpy_array(dates)
+            self.dates_history = dates[-self.lookback:] if len(dates) > self.lookback else dates
+            self.frequency = self._infer_frequency(self.dates_history)
+        else:
+            self.dates_history = None
+            self.frequency = None
 
         # Analyze fractal properties
         self.hurst = self.analyzer.compute_hurst(self.prices_history)
@@ -3525,34 +3569,141 @@ class FractalForecaster:
         probabilities = scores / np.sum(scores)
         return probabilities
 
-    def predict(self, n_steps: int, n_paths: int = 1000, confidence: float = 0.95):
+    def _parse_period(self, period: str) -> int:
+        """
+        Parse period string to number of steps.
+
+        Args:
+            period: Period string like '7d', '2w', '1M', '3m' (minute), '12h'
+
+        Returns:
+            Number of steps based on inferred frequency
+        """
+        import re
+
+        if self.frequency is None:
+            raise ValueError("Cannot use period without dates. Call fit() with dates first.")
+
+        # Parse period string
+        match = re.match(r'(\d+)([a-zA-Z]+)', period)
+        if not match:
+            raise ValueError(f"Invalid period format: {period}. Use format like '7d', '2w', '1M'")
+
+        value = int(match.group(1))
+        unit = match.group(2).lower()
+
+        # Map to steps based on frequency
+        freq_upper = self.frequency.upper() if isinstance(self.frequency, str) else 'D'
+
+        # Daily frequency
+        if freq_upper == 'D' or freq_upper.startswith('D'):
+            if unit in ['d', 'day', 'days']:
+                return value
+            elif unit in ['w', 'week', 'weeks']:
+                return value * 7
+            elif unit in ['m', 'month', 'months']:
+                return value * 30
+            elif unit in ['y', 'year', 'years']:
+                return value * 365
+        # Hourly frequency
+        elif freq_upper == 'H' or freq_upper.startswith('H'):
+            if unit in ['h', 'hour', 'hours']:
+                return value
+            elif unit in ['d', 'day', 'days']:
+                return value * 24
+            elif unit in ['w', 'week', 'weeks']:
+                return value * 24 * 7
+        # Minute frequency
+        elif freq_upper == 'MIN' or freq_upper.startswith('T'):
+            if unit in ['m', 'min', 'minute', 'minutes']:
+                return value
+            elif unit in ['h', 'hour', 'hours']:
+                return value * 60
+            elif unit in ['d', 'day', 'days']:
+                return value * 60 * 24
+
+        raise ValueError(f"Cannot convert period '{period}' with frequency '{self.frequency}'")
+
+    def _calculate_steps_to_date(self, end_date: str) -> int:
+        """
+        Calculate number of steps from last historical date to end_date.
+
+        Args:
+            end_date: Target date as string (e.g., '2025-11-27')
+
+        Returns:
+            Number of steps
+        """
+        import pandas as pd
+
+        if self.dates_history is None:
+            raise ValueError("Cannot use end_date without historical dates. Call fit() with dates first.")
+
+        # Parse dates
+        last_date = pd.to_datetime(self.dates_history[-1])
+        target_date = pd.to_datetime(end_date)
+
+        if target_date <= last_date:
+            raise ValueError(f"end_date ({target_date}) must be after last historical date ({last_date})")
+
+        # Generate date range and count steps
+        date_range = pd.date_range(start=last_date, end=target_date, freq=self.frequency)
+        n_steps = len(date_range) - 1  # Exclude the start date
+
+        return n_steps
+
+    def predict(self, n_steps: int = None, end_date: str = None, period: str = None,
+                n_paths: int = 1000, confidence: float = 0.95):
         """
         Generate forecast with uncertainty quantification and path probabilities.
 
+        Provide exactly ONE of: n_steps, end_date, or period.
+
         Args:
-            n_steps: Number of steps ahead to forecast
+            n_steps: Number of steps ahead to forecast (mutually exclusive with end_date/period)
+            end_date: Forecast until this date (e.g., '2025-11-27') - requires dates in fit()
+            period: Forecast period (e.g., '7d', '2w', '1M') - requires dates in fit()
             n_paths: Number of Monte Carlo paths to simulate (default 1000)
             confidence: Confidence level for intervals (default 0.95)
 
         Returns:
             Dictionary with:
                 'forecast': np.ndarray - Median forecast
+                'weighted_forecast': np.ndarray - Probability-weighted forecast
                 'mean': np.ndarray - Mean forecast
                 'lower': np.ndarray - Lower confidence bound
                 'upper': np.ndarray - Upper confidence bound
                 'std': np.ndarray - Standard deviation
                 'paths': np.ndarray - All simulated paths (n_paths x n_steps)
                 'probabilities': np.ndarray - Probability weight for each path
+                'dates': np.ndarray - Forecast dates (only if dates provided to fit())
 
-        Example:
-            >>> forecaster = FractalForecaster()
-            >>> forecaster.fit(prices)
+        Examples:
+            >>> # Method 1: Specify number of steps
             >>> result = forecaster.predict(n_steps=30)
-            >>> print(f"Forecast: {result['forecast'][-1]:.2f}")
-            >>> print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
+
+            >>> # Method 2: Forecast to specific date (requires dates in fit())
+            >>> forecaster.fit(prices, dates=dates)
+            >>> result = forecaster.predict(end_date='2025-11-27')
+
+            >>> # Method 3: Forecast for a period (requires dates in fit())
+            >>> result = forecaster.predict(period='7d')
         """
         if self.simulator is None:
             raise ValueError("Model not fitted. Call fit() first.")
+
+        # Validate arguments - exactly one must be provided
+        args_provided = sum([n_steps is not None, end_date is not None, period is not None])
+        if args_provided == 0:
+            raise ValueError("Must provide one of: n_steps, end_date, or period")
+        if args_provided > 1:
+            raise ValueError("Provide only ONE of: n_steps, end_date, or period")
+
+        # Calculate n_steps from end_date or period if needed
+        if end_date is not None:
+            n_steps = self._calculate_steps_to_date(end_date)
+        elif period is not None:
+            n_steps = self._parse_period(period)
 
         # Generate paths (single simulation run)
         paths, metadata = self.simulator.simulate_paths(
@@ -3573,7 +3724,8 @@ class FractalForecaster:
         # Probability-weighted forecast (in addition to median)
         weighted_forecast = np.average(paths, axis=0, weights=probabilities)
 
-        return {
+        # Generate forecast dates if historical dates were provided
+        result = {
             'forecast': np.median(paths, axis=0),
             'weighted_forecast': weighted_forecast,
             'mean': np.mean(paths, axis=0),
@@ -3583,6 +3735,15 @@ class FractalForecaster:
             'paths': paths,
             'probabilities': probabilities
         }
+
+        # Add forecast dates if historical dates available
+        if self.dates_history is not None:
+            import pandas as pd
+            last_date = pd.to_datetime(self.dates_history[-1])
+            forecast_dates = pd.date_range(start=last_date, periods=n_steps + 1, freq=self.frequency)[1:]
+            result['dates'] = forecast_dates.to_numpy()
+
+        return result
 
 
 def plot_forecast(prices: np.ndarray,
@@ -3705,7 +3866,7 @@ def plot_forecast_interactive(
     Args:
         prices: Historical price data
         result: Result dict from forecaster.predict() (must include 'paths' and 'probabilities')
-        dates: Date array for x-axis (optional)
+        dates: Historical date array for x-axis (optional, auto-extracted from result if available)
         title: Chart title
         top_n_paths: Number of highest-probability paths to show clearly (default 20)
         show_probability_cloud: Show probability density cloud (default True)
@@ -3714,10 +3875,11 @@ def plot_forecast_interactive(
         Plotly figure object (call .show() to display or .write_html() to save)
 
     Example:
-        >>> result = forecaster.predict(n_steps=30)
+        >>> # Dates handled automatically
+        >>> forecaster.fit(prices, dates=historical_dates)
+        >>> result = forecaster.predict(end_date='2025-11-27')
         >>> fig = ft.plot_forecast_interactive(prices, result)
-        >>> fig.show()  # Display interactive chart
-        >>> fig.write_html('forecast.html')  # Save to file
+        >>> fig.show()
     """
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -3731,15 +3893,32 @@ def plot_forecast_interactive(
     n_hist = len(prices)
     n_forecast = paths.shape[1]
 
+    # Auto-extract forecast dates from result if available
+    forecast_dates = result.get('dates', None)
+
     # Prepare x-axis
-    if dates is not None:
-        dates = _ensure_numpy_array(dates)
-        x_hist = dates[-n_hist:]
-        last_date = x_hist[-1]
-        if isinstance(last_date, (pd.Timestamp, np.datetime64)):
-            x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+    if dates is not None or forecast_dates is not None:
+        # Use provided dates or generate if we have historical dates
+        if dates is not None:
+            dates = _ensure_numpy_array(dates)
+            x_hist = dates[-n_hist:]
         else:
-            x_forecast = np.arange(n_forecast) + n_hist
+            # No historical dates provided, use indices
+            x_hist = np.arange(n_hist)
+
+        # Use forecast dates from result
+        if forecast_dates is not None:
+            x_forecast = _ensure_numpy_array(forecast_dates)
+        else:
+            # Try to generate from historical dates
+            if dates is not None:
+                last_date = x_hist[-1]
+                if isinstance(last_date, (pd.Timestamp, np.datetime64)):
+                    x_forecast = pd.date_range(start=last_date, periods=n_forecast+1, freq='D')[1:]
+                else:
+                    x_forecast = np.arange(n_forecast) + n_hist
+            else:
+                x_forecast = np.arange(n_forecast) + n_hist
     else:
         x_hist = np.arange(n_hist)
         x_forecast = np.arange(n_forecast) + n_hist

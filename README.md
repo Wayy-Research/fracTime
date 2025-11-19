@@ -54,9 +54,48 @@ That's it! One method call gives you everything: forecast, confidence intervals,
 
 ---
 
+## Date-Based Forecasting
+
+**No more manual step calculations!** Just provide your target date or forecast period.
+
+```python
+import fractime as ft
+import pandas as pd
+import numpy as np
+
+# Your daily price data with dates
+dates = pd.date_range(end='2025-11-19', periods=500, freq='D')
+prices = np.random.randn(500).cumsum() + 100
+
+# Fit with dates
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices, dates=dates)
+
+# Method 1: Forecast to specific date (steps computed automatically!)
+result = forecaster.predict(end_date='2025-11-27')
+print(f"Forecast to: {result['dates'][-1]}")
+print(f"Price: ${result['weighted_forecast'][-1]:.2f}")
+
+# Method 2: Forecast by period (even simpler!)
+result = forecaster.predict(period='7d')   # 7 days
+result = forecaster.predict(period='2w')   # 2 weeks
+result = forecaster.predict(period='1M')   # 1 month
+
+# Method 3: Traditional (still works)
+result = forecaster.predict(n_steps=30)
+
+# Dates automatically included in results!
+# Visualizations use dates automatically!
+```
+
+**Supported frequencies:** Daily, hourly, minute (auto-detected)
+**Supported periods:** `'7d'`, `'2w'`, `'1M'`, `'12h'`, `'30m'`, etc.
+
+---
+
 ## Interactive Probability-Weighted Visualization
 
-**NEW**: Visualize high-probability forecast paths with interactive Altair charts!
+**Visualize high-probability forecast paths with interactive Plotly charts!**
 
 ```python
 import fractime as ft
@@ -86,15 +125,17 @@ chart = ft.plot_forecast_interactive(
 chart.show()
 
 # Or save to HTML
-chart.save('forecast.html')
+chart.write_html('forecast.html')
 ```
 
 The interactive chart shows:
 - **Historical data** (black line)
-- **High-probability paths** (blue gradient by probability)
+- **Probability cloud** (all paths with opacity by probability)
+- **High-probability paths** (dark blue gradient, top N paths)
 - **Probability-weighted forecast** (red dashed line)
 - **95% confidence interval** (green band)
 - **Interactive tooltips** with values and probabilities
+- **Probability labels** for top 3 paths
 
 Hover over paths to see their exact probability!
 
@@ -181,23 +222,40 @@ forecaster = ft.FractalForecaster(lookback=252)
 
 #### Methods
 
-**`fit(prices)`**
+**`fit(prices, dates=None)`**
 
 Fit the model to historical data.
 
 ```python
-forecaster.fit(prices)
+forecaster.fit(prices)                    # Without dates
+forecaster.fit(prices, dates=date_array)  # With dates (enables date-based forecasting)
 ```
 
-**`predict(n_steps, n_paths=1000, confidence=0.95)`**
+**`predict(n_steps=None, end_date=None, period=None, n_paths=1000, confidence=0.95)`**
 
 Generate forecast with uncertainty quantification.
 
+**Provide exactly ONE of:** `n_steps`, `end_date`, or `period`
+
 ```python
+# Method 1: Traditional (number of steps)
 result = forecaster.predict(n_steps=30)
+
+# Method 2: Forecast to specific date (requires dates in fit())
+result = forecaster.predict(end_date='2025-11-27')
+
+# Method 3: Forecast for period (requires dates in fit())
+result = forecaster.predict(period='7d')
 ```
 
-Returns dict with:
+**Parameters:**
+- `n_steps` - Number of steps ahead to forecast
+- `end_date` - Target date string (e.g., '2025-11-27') - requires dates in fit()
+- `period` - Period string (e.g., '7d', '2w', '1M') - requires dates in fit()
+- `n_paths` - Number of Monte Carlo paths (default 1000)
+- `confidence` - Confidence level for intervals (default 0.95)
+
+**Returns dict with:**
 - `forecast` - Median forecast
 - `weighted_forecast` - Probability-weighted forecast (recommended)
 - `mean` - Mean forecast
@@ -206,6 +264,7 @@ Returns dict with:
 - `std` - Standard deviation
 - `paths` - All simulated paths (n_paths x n_steps)
 - `probabilities` - Probability weight for each path based on fractal similarity
+- `dates` - Forecast dates (only if dates provided to fit())
 
 #### Attributes (after fitting)
 
@@ -256,26 +315,29 @@ fig.savefig('forecast.png', dpi=300)
 
 ### plot_forecast_interactive()
 
-**Interactive Altair visualization with probability weighting.**
+**Interactive Plotly visualization with probability weighting.**
 
 ```python
 chart = ft.plot_forecast_interactive(
-    prices,                # Historical data
-    result,                # Full result dict from predict()
-    dates=None,            # Optional date array
+    prices,                      # Historical data
+    result,                      # Full result dict from predict()
+    dates=None,                  # Optional historical dates (auto-extracted from result if available)
     title="Forecast",
-    top_n_paths=50,        # Number of high-probability paths to show
-    show_all_paths=False   # Show all paths vs top N
+    top_n_paths=20,              # Number of high-probability paths to highlight
+    show_probability_cloud=True  # Show probability cloud of all paths
 )
-chart.show()              # Display in Jupyter
-chart.save('forecast.html')  # Save to HTML file
+chart.show()                    # Display in Jupyter
+chart.write_html('forecast.html')  # Save to HTML file
 ```
 
 **Features:**
-- Paths colored by fractal similarity probability
+- Probability cloud showing all possible paths
+- High-probability paths highlighted with dark blue gradient
+- Paths colored and sized by fractal similarity probability
+- Probability labels for top 3 paths
 - Interactive hover tooltips
 - Zoom and pan
-- Responsive design
+- Dates handled automatically from result
 
 ---
 
@@ -307,21 +369,57 @@ import fractime as ft
 # Load from CSV
 df = pd.read_csv('data.csv')
 prices = df['close'].values
+dates = pd.to_datetime(df['date'].values)
 
-# Forecast
+# Fit with dates (enables date-based forecasting)
 forecaster = ft.FractalForecaster()
-forecaster.fit(prices)
-result = forecaster.predict(n_steps=20)
+forecaster.fit(prices, dates=dates)
 
-# Plot with dates
-fig = ft.plot_forecast(
+# Forecast to specific date
+result = forecaster.predict(end_date='2025-12-31')
+
+# Plot (dates handled automatically from result)
+fig = ft.plot_forecast_interactive(
     prices=prices,
-    forecast=result['forecast'],
-    confidence_intervals=result,
-    dates=df['date'].values,
-    title="20-Day Forecast"
+    result=result,
+    dates=dates,
+    title="Forecast to 2025-12-31"
 )
 fig.show()
+```
+
+### Date-Based Forecasting Examples
+
+```python
+import pandas as pd
+import fractime as ft
+
+# Your daily price data
+df = pd.read_csv('data.csv')
+prices = df['close'].values
+dates = pd.to_datetime(df['date'].values)
+
+# Fit with dates
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices, dates=dates)
+
+# Example 1: Forecast to specific date (no step calculation!)
+result = forecaster.predict(end_date='2025-11-27')
+print(f"Forecast to: {result['dates'][-1]}")
+print(f"Price: ${result['weighted_forecast'][-1]:.2f}")
+
+# Example 2: Forecast by period
+result_1w = forecaster.predict(period='1w')   # 1 week
+result_2w = forecaster.predict(period='2w')   # 2 weeks
+result_1M = forecaster.predict(period='1M')   # 1 month
+
+# Example 3: Compare forecasts
+print(f"1-week forecast:  ${result_1w['weighted_forecast'][-1]:.2f}")
+print(f"2-week forecast:  ${result_2w['weighted_forecast'][-1]:.2f}")
+print(f"1-month forecast: ${result_1M['weighted_forecast'][-1]:.2f}")
+
+# Dates automatically included in all results!
+print(f"1-week ends: {result_1w['dates'][-1]}")
 ```
 
 ### Probability-Weighted Risk Analysis
