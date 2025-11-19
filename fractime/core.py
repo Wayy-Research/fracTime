@@ -18,6 +18,18 @@ from fractime.optimization import compute_box_dimension_safe
 from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings('ignore')
 
+def _ensure_numpy_array(data):
+    """Convert Polars Series or other array-like to NumPy array."""
+    if data is None:
+        return None
+    if isinstance(data, pl.Series):
+        return data.to_numpy()
+    if isinstance(data, (list, tuple)):
+        return np.array(data)
+    if isinstance(data, pd.Series):
+        return data.to_numpy()
+    return np.asarray(data)
+
 def get_yahoo_data(symbol: str, start_date: str, end_date: str = None) -> pd.DataFrame:
     """Get historical price data from Yahoo Finance."""
     try:
@@ -160,12 +172,13 @@ class CrossDimensionalAnalyzer:
     def add_dimension(self, name: str, data: np.ndarray) -> None:
         """
         Add a market dimension for cross-analysis.
-        
+
         Args:
             name: Dimension name (e.g., "price", "volume")
             data: Time series data for this dimension
         """
-        self.dimensions[name] = data
+        # Convert to NumPy array if needed (e.g., from Polars Series)
+        self.dimensions[name] = _ensure_numpy_array(data)
         self._invalidate_cache()
     
     def _invalidate_cache(self) -> None:
@@ -573,6 +586,9 @@ class FractalAnalyzer:
     
     def analyze_patterns(self, prices: np.ndarray, full_analysis=True) -> dict:
         """Analyze with caching and selective feature computation."""
+        # Convert to NumPy array if needed (e.g., from Polars Series)
+        prices = _ensure_numpy_array(prices)
+
         # Generate a cache key based on the first/last/middle values and length
         if len(prices) > 3:
             cache_key = f"{len(prices)}_{prices[0]:.2f}_{prices[-1]:.2f}_{prices[len(prices)//2]:.2f}"
@@ -703,6 +719,9 @@ class FractalAnalyzer:
     
     def compute_fractal_dimension(self, prices: np.ndarray, quick_mode=False) -> float:
         """Compute fractal dimension, optionally using a faster approximation."""
+        # Convert to NumPy array if needed (e.g., from Polars Series)
+        prices = _ensure_numpy_array(prices)
+
         try:
             if len(prices) < 10:  # Not enough points for meaningful calculation
                 return 1.5  # Return a reasonable default value
@@ -772,6 +791,9 @@ class FractalAnalyzer:
 
     def compute_hurst(self, prices: np.ndarray) -> float:
         """Compute the Hurst exponent for a price series."""
+        # Convert to NumPy array if needed (e.g., from Polars Series)
+        prices = _ensure_numpy_array(prices)
+
         if len(prices) < 20:
             # Not enough data for reliable calculation
             return 0.5
@@ -788,13 +810,14 @@ class FractalAnalyzer:
 
 class FractalSimulator:
     """Generates paths based on fractal patterns and historical distributions."""
-    
+
     def __init__(self, prices: np.ndarray, analyzer: FractalAnalyzer, volumes: np.ndarray = None):
-        self.prices = prices
+        # Convert to NumPy arrays if needed (e.g., from Polars Series)
+        self.prices = _ensure_numpy_array(prices)
         self.analyzer = analyzer
         self.patterns = None
         self.hurst = None
-        self.volumes = volumes
+        self.volumes = _ensure_numpy_array(volumes)
         self.time_warper = TradingTimeWarper()
         self.cross_dim_analyzer = None
         self.quantum_generator = None
@@ -1785,16 +1808,20 @@ class TradingTimeWarper:
     def compute_time_transformation(self, prices: np.ndarray, volumes: np.ndarray = None) -> Dict:
         """
         Compute transformation between clock time and trading time.
-        
+
         Args:
             prices: Historical price series
             volumes: Optional volume series (if available)
-            
+
         Returns:
             Dictionary with time mapping information
         """
+        # Convert to NumPy arrays if needed (e.g., from Polars Series)
+        prices = _ensure_numpy_array(prices)
+        volumes = _ensure_numpy_array(volumes)
+
         n = len(prices)
-        
+
         # Calculate returns and volatility
         log_returns = np.diff(np.log(prices))
         
