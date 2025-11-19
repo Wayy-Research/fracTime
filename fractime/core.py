@@ -4259,6 +4259,23 @@ def print_forecast_summary(result: dict, current_price: float = None, show_paths
     """
     import datetime
 
+    # Validate input type
+    if not isinstance(result, dict):
+        raise TypeError(
+            f"Expected 'result' to be a dict from forecaster.predict(), "
+            f"but got {type(result).__name__}. "
+            f"Usage: ft.print_forecast_summary(result, current_price=prices[-1])"
+        )
+
+    # Check for required keys
+    required_keys = ['forecast', 'weighted_forecast', 'paths', 'probabilities']
+    missing_keys = [k for k in required_keys if k not in result]
+    if missing_keys:
+        raise ValueError(
+            f"Result dictionary is missing required keys: {missing_keys}. "
+            f"Make sure you're passing the result from forecaster.predict()"
+        )
+
     print("\n" + "=" * 70)
     print("FORECAST SUMMARY")
     print("=" * 70)
