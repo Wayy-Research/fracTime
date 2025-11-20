@@ -250,6 +250,49 @@ class CrossDimensionalAnalyzer:
         self.correlation_matrix = combined_matrix
         return combined_matrix
 
+    def analyze(self, data: np.ndarray, dim_names: list = None) -> Dict:
+        """
+        Analyze multivariate time series for cross-dimensional fractal properties.
+
+        Args:
+            data: 2D array (n_samples, n_dimensions)
+            dim_names: Optional names for each dimension
+
+        Returns:
+            Dictionary with correlation, cross_hurst, and other metrics
+        """
+        if data.ndim == 1:
+            raise ValueError("Data must be 2D array for cross-dimensional analysis")
+
+        n_dims = data.shape[1]
+        if dim_names is None:
+            dim_names = [f'dim_{i}' for i in range(n_dims)]
+
+        # Clear existing dimensions and add new ones
+        self.dimensions = {}
+        for i, name in enumerate(dim_names):
+            self.add_dimension(name, data[:, i])
+
+        # Compute basic correlation
+        correlation = self.compute_cross_correlation()
+
+        # Compute Hurst exponents for each dimension
+        hurst_exponents = self.compute_hurst_exponents()
+
+        # Cross-Hurst (average of all Hurst exponents)
+        cross_hurst = np.mean(list(hurst_exponents.values()))
+
+        # Fractal dimensions
+        fractal_dims = self.compute_fractal_dimensions()
+
+        return {
+            'correlation': correlation,
+            'cross_hurst': cross_hurst,
+            'hurst_exponents': hurst_exponents,
+            'fractal_dimensions': fractal_dims,
+            'dim_names': dim_names
+        }
+
     # Additional methods from original code (compute_fractal_coherence, identify_regimes, analyze_dimensions)
     # Omitted for brevity - include them from lines 304-577 in original core.py
 
@@ -260,6 +303,27 @@ class FractalAnalyzer:
     def __init__(self):
         """Initialize with empty cache for performance."""
         self.cache = {}
+
+    def analyze(self, prices: np.ndarray) -> Dict:
+        """
+        Analyze fractal properties of a time series.
+
+        Args:
+            prices: Time series data
+
+        Returns:
+            Dictionary with hurst, fractal_dimension, and other metrics
+        """
+        prices = _ensure_numpy_array(prices)
+
+        hurst = self.compute_hurst(prices)
+        fractal_dim = self.compute_fractal_dimension(prices)
+
+        return {
+            'hurst': hurst,
+            'fractal_dimension': fractal_dim,
+            'persistence': 'trending' if hurst > 0.6 else ('mean_reverting' if hurst < 0.4 else 'random_walk')
+        }
 
     def analyze_patterns(self, prices: np.ndarray, full_analysis=True) -> dict:
         """Analyze with caching and selective feature computation."""

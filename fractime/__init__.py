@@ -12,13 +12,27 @@ Simple, flat API following the Zen of Python:
 """
 
 # Core forecasting (top-level imports for simplicity)
-from .core import FractalForecaster, plot_forecast, plot_forecast_interactive, print_forecast_summary
+from .core import FractalForecaster
 
 # Analysis tools (also available at top level)
 from .analysis import FractalAnalyzer, CrossDimensionalAnalyzer
 
-# Simulation (for advanced users)
-from .core import FractalSimulator
+# Simulation tools (refactored into separate module)
+from .simulation import FractalSimulator, TradingTimeWarper, PathAnalyzer
+
+# Visualization tools (refactored into separate module)
+from .visualization import (
+    FractalVisualizer,
+    plot_forecast,
+    plot_forecast_interactive,
+    print_forecast_summary
+)
+
+# Ensemble methods (advanced)
+from .ensemble import StackingForecaster, BoostingForecaster
+
+# Utility functions
+from .utils import get_yahoo_data
 
 # Bayesian forecasting (optional, requires PyMC)
 try:
@@ -40,6 +54,7 @@ __all__ = [
     'plot_forecast_interactive',
     'plot_forecast',
     'print_forecast_summary',
+    'FractalVisualizer',
 
     # Analysis
     'FractalAnalyzer',
@@ -47,6 +62,15 @@ __all__ = [
 
     # Simulation (advanced)
     'FractalSimulator',
+    'TradingTimeWarper',
+    'PathAnalyzer',
+
+    # Ensemble methods (advanced)
+    'StackingForecaster',
+    'BoostingForecaster',
+
+    # Utilities
+    'get_yahoo_data',
 ]
 
 # Add Bayesian if available

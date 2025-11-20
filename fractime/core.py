@@ -1275,7 +1275,12 @@ class FractalSimulator:
         # Cluster and analyze paths
         scaler = StandardScaler()
         scaled_paths = scaler.fit_transform(paths)
-        
+
+        # Handle NaN/Inf that can occur with constant values
+        if not np.all(np.isfinite(scaled_paths)):
+            # Replace NaN/Inf with zeros (constant paths get zero variance)
+            scaled_paths = np.nan_to_num(scaled_paths, nan=0.0, posinf=0.0, neginf=0.0)
+
         n_clusters = 5
         kmeans = KMeans(n_clusters=n_clusters)
         labels = kmeans.fit_predict(scaled_paths)
@@ -3434,14 +3439,20 @@ class FractalForecaster:
     to create accurate time series forecasts.
     """
 
-    def __init__(self, lookback: int = 252):
+    def __init__(self, lookback: int = 252, method: str = 'rs', min_scale: int = 10, max_scale: int = 100):
         """
         Initialize the forecaster.
 
         Args:
             lookback: Number of historical periods to use for analysis
+            method: Hurst exponent calculation method ('rs' or 'dfa')
+            min_scale: Minimum scale for fractal analysis
+            max_scale: Maximum scale for fractal analysis
         """
         self.lookback = lookback
+        self.method = method
+        self.min_scale = min_scale
+        self.max_scale = max_scale
         self.analyzer = FractalAnalyzer()
         self.simulator = None
         self.prices_history = None
@@ -3461,13 +3472,24 @@ class FractalForecaster:
             Frequency string ('D', 'H', 'min', etc.)
         """
         # Convert to polars Series for datetime operations
+        from datetime import datetime
+
         if isinstance(dates[0], str):
             dates_pl = pl.Series(dates).str.to_datetime()
+        elif isinstance(dates[0], datetime):
+            # Convert Python datetime objects to numpy datetime64 first
+            dates_np = np.array(dates, dtype='datetime64[ns]')
+            dates_pl = pl.Series(dates_np)
         else:
-            # Convert numpy datetime64 or datetime objects to polars
+            # Convert numpy datetime64 or other to polars
             dates_pl = pl.Series(dates)
             if dates_pl.dtype != pl.Datetime:
-                dates_pl = dates_pl.cast(pl.Datetime)
+                try:
+                    dates_pl = dates_pl.cast(pl.Datetime)
+                except:
+                    # Fallback: convert to numpy datetime64 first
+                    dates_np = np.array(dates, dtype='datetime64[ns]')
+                    dates_pl = pl.Series(dates_np)
 
         # Calculate difference between consecutive dates
         diffs = dates_pl.diff().drop_nulls()
@@ -3756,6 +3778,35 @@ class FractalForecaster:
         """
         if self.simulator is None:
             raise ValueError("Model not fitted. Call fit() first.")
+
+        # Handle constant/near-constant prices edge case
+        price_std = np.std(self.prices_history)
+        if price_std < 1e-10:  # Essentially constant
+            # Return simple forecast with the constant value
+            constant_value = self.prices_history[-1]
+
+            # Still need to determine n_steps
+            if end_date is not None:
+                n_steps = self._calculate_steps_to_date(end_date)
+            elif period is not None:
+                n_steps = self._parse_period(period)
+            elif n_steps is None:
+                raise ValueError("Must provide one of: n_steps, end_date, or period")
+
+            forecast = np.full(n_steps, constant_value)
+            return {
+                'forecast': forecast,
+                'weighted_forecast': forecast,
+                'mean': forecast,
+                'lower': forecast,
+                'upper': forecast,
+                'weighted_lower': forecast,
+                'weighted_upper': forecast,
+                'std': np.zeros(n_steps),
+                'paths': np.tile(forecast, (1, 1)),
+                'probabilities': np.array([1.0]),
+                'model_name': 'Fractal (constant series)',
+            }
 
         # Validate arguments - exactly one must be provided
         args_provided = sum([n_steps is not None, end_date is not None, period is not None])
