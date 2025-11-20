@@ -1,11 +1,46 @@
 # FracTime
 
-**Fractal-based time series forecasting in Python.**
+**Fractal-based time series forecasting with ensemble methods and rigorous backtesting.**
 
 FracTime uses fractal geometry and chaos theory to create accurate forecasts. Unlike traditional methods that assume normal distributions and independence, FracTime captures long-term memory, self-similarity, and regime changes in time series data.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+## ✨ What's New
+
+**Baseline Models**: Compare fractal forecasts against ARIMA, ETS, and LSTM (PyTorch)
+
+**Ensemble Methods**: Combine models with Stacking (meta-learning) and Boosting (sequential error correction)
+
+**Backtesting Framework**: Rigorous walk-forward validation with comprehensive metrics
+
+**Cross-Dimensional Analysis**: Analyze fractal properties across multiple time series
+
+## 🎯 Features
+
+### Core Forecasting
+- 🔮 **Fractal Forecasting**: Hurst exponent, fractal dimension, long-term memory
+- 📊 **Baseline Models**: ARIMA (auto), ETS, LSTM with Monte Carlo dropout
+- 🎲 **Uncertainty Quantification**: Confidence intervals, probability distributions
+- 📅 **Date-Based Forecasting**: Forecast to specific dates or periods ('7d', '2w', '1M')
+
+### Advanced Methods
+- 🧠 **Stacking Ensemble**: Meta-learning with Ridge/Linear/RandomForest
+- ⚡ **Boosting Ensemble**: Sequential error correction
+- 🌐 **Cross-Dimensional**: Multi-variate fractal analysis
+- 🔄 **Regime-Adaptive**: Automatic adjustment to market regimes
+
+### Validation & Metrics
+- ✅ **Walk-Forward Validation**: Rigorous backtesting framework
+- 📈 **Comprehensive Metrics**: RMSE, MAE, MAPE, directional accuracy, coverage
+- 🎯 **Model Comparison**: Compare multiple models with one function
+- 📊 **Dual Penalty Scoring**: Balance accuracy vs overfitting
+
+### Visualization
+- 📉 **Interactive Plots**: Plotly charts with probability weighting
+- 🎨 **Static Plots**: Publication-ready matplotlib figures
+- 📝 **Pretty Summaries**: Formatted forecast summaries for terminal/notebook
 
 ---
 
@@ -15,6 +50,9 @@ FracTime uses fractal geometry and chaos theory to create accurate forecasts. Un
 uv venv
 source .venv/bin/activate
 uv pip install -e .
+
+# Optional: For ARIMA support
+pip install pmdarima
 ```
 
 ---
@@ -309,133 +347,267 @@ Probabilities:
 
 ## API Reference
 
-### FractalForecaster
+### Core Classes
 
-**Main class** - Use this for forecasting.
+#### FractalForecaster
 
-```python
-forecaster = ft.FractalForecaster(lookback=252)
-```
-
-#### Methods
-
-**`fit(prices, dates=None)`**
-
-Fit the model to historical data.
+**Main forecasting class** - Fractal-based time series forecasting.
 
 ```python
-forecaster.fit(prices)                    # Without dates
-forecaster.fit(prices, dates=date_array)  # With dates (enables date-based forecasting)
+forecaster = ft.FractalForecaster(lookback=252, method='rs')
 ```
 
-**`predict(n_steps=None, end_date=None, period=None, n_paths=1000, confidence=0.95)`**
+**Methods:**
+- `fit(prices, dates=None)` → self - Fit model to data
+- `predict(n_steps=None, end_date=None, period=None, n_paths=1000, confidence=0.95)` → dict
 
-Generate forecast with uncertainty quantification.
+**Attributes:** `hurst`, `fractal_dim`
 
-**Provide exactly ONE of:** `n_steps`, `end_date`, or `period`
-
-```python
-# Method 1: Traditional (number of steps)
-result = forecaster.predict(n_steps=30)
-
-# Method 2: Forecast to specific date (requires dates in fit())
-result = forecaster.predict(end_date='2025-11-27')
-
-# Method 3: Forecast for period (requires dates in fit())
-result = forecaster.predict(period='7d')
-```
-
-**Parameters:**
-- `n_steps` - Number of steps ahead to forecast
-- `end_date` - Target date string (e.g., '2025-11-27') - requires dates in fit()
-- `period` - Period string (e.g., '7d', '2w', '1M') - requires dates in fit()
-- `n_paths` - Number of Monte Carlo paths (default 1000)
-- `confidence` - Confidence level for intervals (default 0.95)
-
-**Returns dict with:**
-- `forecast` - Median forecast
-- `weighted_forecast` - Probability-weighted forecast (recommended)
-- `mean` - Mean forecast
-- `lower` - Lower confidence bound
-- `upper` - Upper confidence bound
-- `std` - Standard deviation
-- `paths` - All simulated paths (n_paths x n_steps)
-- `probabilities` - Probability weight for each path based on fractal similarity
-- `dates` - Forecast dates (only if dates provided to fit())
-
-#### Attributes (after fitting)
-
-- `hurst` - Hurst exponent
-- `fractal_dim` - Fractal dimension
-
----
-
-### FractalAnalyzer
+#### FractalAnalyzer
 
 **Analyze fractal properties** of time series.
 
 ```python
 analyzer = ft.FractalAnalyzer()
 hurst = analyzer.compute_hurst(prices)
-fractal_dim = analyzer.compute_fractal_dimension(prices)
 ```
 
 **Methods:**
-- `compute_hurst(prices)` → float
-- `compute_fractal_dimension(prices)` → float
-- `analyze_patterns(prices)` → dict
-
-**Interpretation:**
-- H > 0.5: Trending (persistent)
-- H < 0.5: Mean-reverting (anti-persistent)
-- H ≈ 0.5: Random walk
+- `compute_hurst(prices)` → float - Hurst exponent (H>0.5=trending, H<0.5=mean-reverting)
+- `compute_fractal_dimension(prices)` → float - Fractal dimension
+- `analyze_patterns(prices)` → dict - Full pattern analysis
+- `analyze(prices)` → dict - Complete fractal analysis
 
 ---
 
-### plot_forecast()
+### Baseline Models
 
-**Static matplotlib visualization.**
+#### ARIMAForecaster
+
+Auto-ARIMA with automatic parameter selection via pmdarima.
 
 ```python
-fig = ft.plot_forecast(
-    prices,                    # Historical data
-    forecast=None,             # Forecast line
-    paths=None,                # Simulated paths
-    confidence_intervals=None, # Dict with 'lower', 'upper'
-    title="Forecast",
-    dates=None,                # Optional date array
-    show_patterns=False        # Show individual paths
-)
-fig.show()
-fig.savefig('forecast.png', dpi=300)
+from fractime.baselines import ARIMAForecaster
+
+arima = ARIMAForecaster(seasonal=False, max_p=5, max_q=5)
+arima.fit(prices)
+result = arima.predict(n_steps=30)
 ```
 
-### plot_forecast_interactive()
+**Parameters:** `seasonal`, `m`, `max_p`, `max_q`, `max_d`, `stepwise`
 
-**Interactive Plotly visualization with probability weighting.**
+#### ETSForecaster
+
+Exponential smoothing state space model.
+
+```python
+from fractime.baselines import ETSForecaster
+
+ets = ETSForecaster(trend='add', seasonal=None)
+ets.fit(prices)
+result = ets.predict(n_steps=30)
+```
+
+**Parameters:** `trend` ('add', 'mul', None), `seasonal` ('add', 'mul', None), `damped`
+
+#### LSTMForecaster
+
+Deep learning with PyTorch and Monte Carlo dropout for uncertainty.
+
+```python
+from fractime.baselines import LSTMForecaster
+
+lstm = LSTMForecaster(hidden_size=50, num_layers=2, dropout=0.2)
+lstm.fit(prices, epochs=100)
+result = lstm.predict(n_steps=30, n_simulations=100)
+```
+
+**Parameters:** `hidden_size`, `num_layers`, `dropout`, `learning_rate`, `batch_size`
+
+**All baseline models** share the same API: `fit(prices)` → `predict(n_steps)` → dict with `forecast`, `mean`, `std`, `lower`, `upper`
+
+---
+
+### Ensemble Methods
+
+#### StackingForecaster
+
+Meta-learning ensemble using cross-validation.
+
+```python
+from fractime.ensemble import StackingForecaster
+
+stacker = StackingForecaster(
+    base_models=[model1, model2, model3],
+    meta_learner='ridge',  # or 'linear', 'rf'
+    n_splits=5
+)
+stacker.fit(prices)
+result = stacker.predict(n_steps=30)
+weights = stacker.get_model_weights()
+```
+
+**Methods:**
+- `fit(prices)` → self
+- `predict(n_steps)` → dict
+- `get_model_weights()` → dict - Model importance scores
+- `add_model(model, name=None)` - Add a base model
+
+#### BoostingForecaster
+
+Sequential error correction ensemble.
+
+```python
+from fractime.ensemble import BoostingForecaster
+
+booster = BoostingForecaster(
+    base_model_configs=[(ModelClass, params), ...],
+    n_estimators=5,
+    learning_rate=0.1
+)
+booster.fit(prices)
+result = booster.predict(n_steps=30)
+```
+
+**Methods:**
+- `fit(prices)` → self
+- `predict(n_steps)` → dict
+- `get_model_weights()` → list - Model weights
+- `add_model_config(model_class, params)` - Add model configuration
+
+---
+
+### Backtesting
+
+#### WalkForwardValidator
+
+Rigorous walk-forward validation framework.
+
+```python
+from fractime.backtesting import WalkForwardValidator
+
+validator = WalkForwardValidator(
+    model=FractalForecaster(),
+    initial_window=252,
+    step_size=20,
+    forecast_horizon=10
+)
+results = validator.run(prices, dates)
+```
+
+**Returns dict with:**
+- `metrics` - Comprehensive accuracy metrics
+- `forecasts` - All forecast values
+- `actuals` - Actual observed values
+- `parameter_history` - Model parameter evolution
+
+#### compare_models()
+
+Compare multiple models with walk-forward validation.
+
+```python
+from fractime.backtesting import compare_models
+
+comparison = compare_models(
+    models={'Fractal': FractalForecaster(), 'ARIMA': ARIMAForecaster()},
+    prices=prices,
+    dates=dates,
+    initial_window=100,
+    step_size=20,
+    forecast_horizon=10
+)
+```
+
+**Returns:** Dict mapping model names to metrics (MAE, RMSE, MAPE, MSE, etc.)
+
+#### ForecastMetrics
+
+Comprehensive forecast evaluation metrics.
+
+```python
+from fractime.backtesting import ForecastMetrics
+
+metrics = ForecastMetrics.compute_all(
+    forecasts=predictions,
+    actuals=actual_values,
+    current_prices=current,
+    lower=lower_bound,
+    upper=upper_bound
+)
+```
+
+**Metrics computed:** RMSE, MAE, MAPE, MSE, directional accuracy, coverage, calibration error, CRPS
+
+---
+
+### Analysis
+
+#### CrossDimensionalAnalyzer
+
+Analyze fractal properties across multiple time series.
+
+```python
+from fractime.analysis import CrossDimensionalAnalyzer
+
+analyzer = CrossDimensionalAnalyzer()
+analyzer.add_dimension('Stock A', prices_a)
+analyzer.add_dimension('Stock B', prices_b)
+
+correlation = analyzer.compute_cross_correlation()
+hurst_exp = analyzer.compute_hurst_exponents()
+```
+
+**Methods:**
+- `add_dimension(name, prices)` - Add a dimension
+- `compute_cross_correlation()` → ndarray - Correlation matrix
+- `compute_hurst_exponents()` → dict - Hurst per dimension
+- `analyze(data, dim_names)` → dict - Complete analysis
+
+---
+
+### Visualization
+
+#### plot_forecast_interactive()
+
+Interactive Plotly visualization with probability weighting.
 
 ```python
 chart = ft.plot_forecast_interactive(
-    prices,                      # Historical data
-    result,                      # Full result dict from predict()
-    dates=None,                  # Optional historical dates (auto-extracted from result if available)
+    prices,
+    result,
+    dates=None,
     title="Forecast",
-    top_n_paths=20,              # Number of high-probability paths to highlight
-    show_probability_cloud=True  # Show probability cloud of all paths
+    top_n_paths=20
 )
-chart.show()                    # Display in Jupyter
-chart.write_html('forecast.html')  # Save to HTML file
+chart.show()
 ```
 
-**Features:**
-- Probability cloud showing all possible paths (light blue)
-- High-probability paths highlighted with orange-red gradient
-- Clean lines only (no markers) for easy viewing
-- Line thickness based on probability rank
-- Probability labels for top 3 paths
-- Interactive hover tooltips
-- Zoom and pan
-- Dates handled automatically from result
+**Features:** Probability cloud, high-probability path highlighting, weighted CI, interactive tooltips
+
+---
+
+#### plot_forecast()
+
+Static matplotlib visualization.
+
+```python
+fig = ft.plot_forecast(
+    prices,
+    forecast=None,
+    paths=None,
+    confidence_intervals=None,
+    title="Forecast"
+)
+fig.show()
+```
+
+#### print_forecast_summary()
+
+Pretty-print forecast summary to terminal/notebook.
+
+```python
+ft.print_forecast_summary(result, current_price=prices[-1], show_paths=10)
+```
 
 ---
 
@@ -551,29 +723,26 @@ most_likely_outcome = final_values[most_likely_idx]
 print(f"Most likely outcome: {most_likely_outcome:.2f} (prob: {probs[most_likely_idx]:.4f})")
 ```
 
-### Backtesting
+### Backtesting Example
 
 ```python
-# Walk-forward validation
-train_size = 250
-test_size = 30
-errors = []
+from fractime.backtesting import WalkForwardValidator
 
-for i in range(0, len(prices) - train_size - test_size, test_size):
-    # Train
-    train_data = prices[i:i+train_size]
-    forecaster = ft.FractalForecaster()
-    forecaster.fit(train_data)
+# Automated walk-forward validation
+validator = WalkForwardValidator(
+    model=ft.FractalForecaster(),
+    initial_window=250,
+    step_size=30,
+    forecast_horizon=30
+)
 
-    # Predict
-    result = forecaster.predict(n_steps=test_size)
+results = validator.run(prices, dates)
 
-    # Evaluate
-    actual = prices[i+train_size:i+train_size+test_size]
-    rmse = np.sqrt(np.mean((result['forecast'] - actual)**2))
-    errors.append(rmse)
-
-print(f"Average RMSE: {np.mean(errors):.2f}")
+# Comprehensive metrics automatically computed
+print(f"RMSE: {results['metrics']['rmse']:.2f}")
+print(f"MAE: {results['metrics']['mae']:.2f}")
+print(f"Directional Accuracy: {results['metrics']['direction_accuracy']:.2%}")
+print(f"Coverage: {results['metrics']['coverage']:.2%}")
 ```
 
 ---
@@ -638,6 +807,185 @@ Provides:
 
 ---
 
+## Baseline Models
+
+Compare fractal forecasts against classical and deep learning baselines:
+
+```python
+from fractime.baselines import ARIMAForecaster, ETSForecaster, LSTMForecaster
+
+# ARIMA - Auto-ARIMA with automatic parameter selection
+arima = ARIMAForecaster()
+arima.fit(prices)
+arima_result = arima.predict(n_steps=30)
+
+# ETS - Exponential smoothing state space model
+ets = ETSForecaster(trend='add', seasonal=None)
+ets.fit(prices)
+ets_result = ets.predict(n_steps=30)
+
+# LSTM - Deep learning with PyTorch and Monte Carlo dropout
+lstm = LSTMForecaster(hidden_size=50, num_layers=2)
+lstm.fit(prices)
+lstm_result = lstm.predict(n_steps=30, n_simulations=100)
+
+# Fractal
+fractal = ft.FractalForecaster()
+fractal.fit(prices)
+fractal_result = fractal.predict(n_steps=30)
+
+# Compare
+print(f"Fractal: {fractal_result['forecast'][-1]:.2f}")
+print(f"ARIMA:   {arima_result['forecast'][-1]:.2f}")
+print(f"ETS:     {ets_result['forecast'][-1]:.2f}")
+print(f"LSTM:    {lstm_result['forecast'][-1]:.2f}")
+```
+
+**All models** share the same simple API: `fit(prices)` → `predict(n_steps)` → returns dict with `forecast`, `mean`, `std`, `lower`, `upper`.
+
+---
+
+## Ensemble Methods
+
+Combine multiple models for more robust predictions:
+
+### Stacking Ensemble
+
+Uses meta-learning to optimally weight model predictions via cross-validation:
+
+```python
+from fractime import FractalForecaster
+from fractime.baselines import ARIMAForecaster, ETSForecaster
+from fractime.ensemble import StackingForecaster
+
+# Fit base models
+models = [
+    FractalForecaster().fit(prices),
+    ARIMAForecaster().fit(prices),
+    ETSForecaster().fit(prices)
+]
+
+# Create stacking ensemble with Ridge meta-learner
+stacker = StackingForecaster(base_models=models, meta_learner='ridge')
+stacker.fit(prices)
+
+# Generate ensemble forecast
+result = stacker.predict(n_steps=30)
+print(f"Ensemble forecast: {result['forecast'][-1]:.2f}")
+
+# Check model weights
+weights = stacker.get_model_weights()
+print("Model contributions:", weights)
+```
+
+**Meta-learners**: `'ridge'` (default), `'linear'`, or `'rf'` (Random Forest)
+
+### Boosting Ensemble
+
+Sequential error correction where each model focuses on previous mistakes:
+
+```python
+from fractime.ensemble import BoostingForecaster
+
+# Define model configurations
+configs = [
+    (FractalForecaster, {}),
+    (ARIMAForecaster, {}),
+    (ETSForecaster, {'trend': 'add'})
+]
+
+# Create boosting ensemble
+booster = BoostingForecaster(
+    base_model_configs=configs,
+    n_estimators=5,
+    learning_rate=0.1
+)
+booster.fit(prices)
+
+result = booster.predict(n_steps=30)
+print(f"Boosted forecast: {result['forecast'][-1]:.2f}")
+```
+
+---
+
+## Backtesting Framework
+
+Rigorous walk-forward validation for any model:
+
+```python
+from fractime.backtesting import WalkForwardValidator, ForecastMetrics
+
+# Create validator
+validator = WalkForwardValidator(
+    model=FractalForecaster(),
+    initial_window=252,      # 1 year of training data
+    step_size=20,            # Refit every 20 steps
+    forecast_horizon=10      # 10-step-ahead forecasts
+)
+
+# Run validation
+results = validator.run(prices, dates)
+
+# Comprehensive metrics
+metrics = results['metrics']
+print(f"RMSE: {metrics['rmse']:.4f}")
+print(f"MAE:  {metrics['mae']:.4f}")
+print(f"Directional Accuracy: {metrics['direction_accuracy']:.2%}")
+print(f"Coverage (95% CI): {metrics['coverage']:.2%}")
+
+# Compare multiple models
+from fractime.backtesting import compare_models
+
+comparison = compare_models(
+    models={
+        'Fractal': FractalForecaster(),
+        'ARIMA': ARIMAForecaster(),
+        'ETS': ETSForecaster()
+    },
+    prices=prices,
+    dates=dates,
+    initial_window=100,
+    step_size=20,
+    forecast_horizon=10
+)
+
+for name, metrics in comparison.items():
+    print(f"{name}: MAE={metrics['mae']:.2f}, RMSE={metrics['rmse']:.2f}")
+```
+
+**Metrics computed**: RMSE, MAE, MAPE, MSE, directional accuracy, coverage, calibration error
+
+---
+
+## Cross-Dimensional Analysis
+
+Analyze fractal properties across multiple related time series:
+
+```python
+from fractime.analysis import CrossDimensionalAnalyzer
+
+# Multiple time series (e.g., different stocks, assets, or markets)
+data = np.column_stack([prices_stock1, prices_stock2, prices_stock3])
+dimension_names = ['Stock A', 'Stock B', 'Stock C']
+
+# Analyze cross-dimensional fractal structure
+analyzer = CrossDimensionalAnalyzer()
+for i, name in enumerate(dimension_names):
+    analyzer.add_dimension(name, data[:, i])
+
+# Compute correlations and cross-Hurst exponents
+correlation = analyzer.compute_cross_correlation()
+hurst_exp = analyzer.compute_hurst_exponents()
+
+print("Cross-correlation matrix:")
+print(correlation)
+print("\nHurst exponents:")
+for name, h in hurst_exp.items():
+    print(f"{name}: {h:.3f}")
+```
+
+---
+
 ## Advanced
 
 ### Direct Simulation
@@ -655,23 +1003,22 @@ result = forecaster.predict(n_steps=30, confidence=0.90)  # 90% CI
 result = forecaster.predict(n_steps=30, confidence=0.99)  # 99% CI
 ```
 
-### Compare with ARIMA
+### Regime-Adaptive Forecasting
+
+Automatically adjust forecasts based on detected regime changes:
 
 ```python
-from fractime.forecasting import ARIMAForecaster
+# Fit with regime detection
+forecaster = ft.FractalForecaster()
+forecaster.fit(prices)
 
-# Fractal
-fractal = ft.FractalForecaster()
-fractal.fit(prices)
-fractal_result = fractal.predict(n_steps=30)
+# Predict with regime adaptation
+result = forecaster.predict(n_steps=30, n_paths=1000)
 
-# ARIMA
-arima = ARIMAForecaster(p=1, d=1, q=1)
-arima.fit(X=prices[:-30].reshape(-1, 1), y=prices[:-30])
-arima_forecast = arima.predict(X=np.zeros((30, 1)))
-
-print(f"Fractal: {fractal_result['forecast'][-1]:.2f}")
-print(f"ARIMA: {arima_forecast[-1]:.2f}")
+# Analyze regime characteristics
+if hasattr(forecaster, 'current_regime'):
+    print(f"Current regime: {forecaster.current_regime}")
+    print(f"Hurst: {forecaster.hurst:.3f}")
 ```
 
 ---
