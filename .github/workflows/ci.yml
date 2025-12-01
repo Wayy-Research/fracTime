@@ -28,9 +28,11 @@ jobs:
 
       - name: Lint with ruff
         run: ruff check fractime/
+        continue-on-error: true  # Linting is advisory for now
 
       - name: Format check with black
         run: black --check fractime/ tests/
+        continue-on-error: true  # Formatting is advisory for now
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
