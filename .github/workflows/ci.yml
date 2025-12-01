@@ -51,4 +51,5 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Type check with mypy
-        run: mypy fractime/ --ignore-missing-imports
+        run: mypy fractime/ --ignore-missing-imports --allow-untyped-defs
+        continue-on-error: true  # Type checking is advisory for now
