@@ -5,6 +5,7 @@ Tests model registry, auto-selection, statistical tests, and ensemble methods.
 """
 
 import numpy as np
+import pytest
 import sys
 
 
