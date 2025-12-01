@@ -5,7 +5,7 @@
 - Python 3.10 or higher
 - pip or uv package manager
 
-## Basic Installation
+## Installation
 
 Install FracTime from PyPI:
 
@@ -13,51 +13,21 @@ Install FracTime from PyPI:
 pip install fractime
 ```
 
-This installs the core package with fractal forecasting capabilities.
+This installs the complete package including:
 
-## Optional Dependencies
-
-FracTime has optional dependency groups for extended functionality:
-
-### Baseline Models
-
-Includes ARIMA (pmdarima), GARCH (arch), and Prophet:
-
-```bash
-pip install fractime[baselines]
-```
-
-### Bayesian Forecasting
-
-Includes PyMC for Bayesian inference:
-
-```bash
-pip install fractime[bayesian]
-```
-
-### Machine Learning Extras
-
-Includes XGBoost:
-
-```bash
-pip install fractime[ml-extra]
-```
-
-### Everything
-
-Install all optional dependencies:
-
-```bash
-pip install fractime[all]
-```
+- Fractal forecasting (Hurst exponent, fractal dimension)
+- Baseline models (ARIMA, GARCH, Prophet)
+- Bayesian forecasting (PyMC)
+- Machine learning (XGBoost)
+- Ensemble methods and backtesting
 
 ## Development Installation
 
 For contributing or development:
 
 ```bash
-git clone https://github.com/Wayy-Research/fractime.git
-cd fractime
+git clone https://github.com/Wayy-Research/fracTime.git
+cd fracTime
 pip install -e ".[dev,docs]"
 ```
 
@@ -82,15 +52,9 @@ print(f"Forecast generated: {len(result['forecast'])} steps")
 
 On first import, Numba compiles optimized functions. This may take a few seconds but only happens once.
 
-### PyMC Installation Issues
+### PyMC on Apple Silicon
 
-If you encounter issues with PyMC:
-
-```bash
-pip install pymc arviz pytensor
-```
-
-On Apple Silicon Macs, you may need:
+On Apple Silicon Macs, if you encounter PyMC issues:
 
 ```bash
 conda install -c conda-forge pymc

@@ -12,13 +12,7 @@ Fractal-based time series forecasting with ensemble methods and rigorous backtes
 pip install fractime
 ```
 
-For additional features:
-
-```bash
-pip install fractime[baselines]  # ARIMA, GARCH, Prophet
-pip install fractime[bayesian]   # Bayesian forecasting with PyMC
-pip install fractime[all]        # Everything
-```
+All dependencies (ARIMA, GARCH, Prophet, PyMC, XGBoost) are included.
 
 ## Quick Start
 
