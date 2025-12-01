@@ -1,8 +1,8 @@
 site_name: FracTime
 site_description: Fractal-based time series forecasting
-site_url: https://wayy-research.github.io/fractime
-repo_url: https://github.com/Wayy-Research/fractime
-repo_name: Wayy-Research/fractime
+site_url: https://wayy-research.github.io/fracTime
+repo_url: https://github.com/Wayy-Research/fracTime
+repo_name: Wayy-Research/fracTime
 
 theme:
   name: material

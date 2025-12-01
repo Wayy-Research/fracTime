@@ -39,10 +39,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Wayy-Research/fractime"
-Documentation = "https://wayy-research.github.io/fractime"
-Repository = "https://github.com/Wayy-Research/fractime"
-Issues = "https://github.com/Wayy-Research/fractime/issues"
+Homepage = "https://github.com/Wayy-Research/fracTime"
+Documentation = "https://wayy-research.github.io/fracTime"
+Repository = "https://github.com/Wayy-Research/fracTime"
+Issues = "https://github.com/Wayy-Research/fracTime/issues"
 
 [project.optional-dependencies]
 ml-extra = [

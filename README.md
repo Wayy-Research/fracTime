@@ -4,7 +4,7 @@ Fractal-based time series forecasting with ensemble methods and rigorous backtes
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://wayy-research.github.io/fractime)
+[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://wayy-research.github.io/fracTime)
 
 ## Installation
 
@@ -57,12 +57,12 @@ fig.show()
 
 ## Documentation
 
-Full documentation: [https://wayy-research.github.io/fractime](https://wayy-research.github.io/fractime)
+Full documentation: [https://wayy-research.github.io/fracTime](https://wayy-research.github.io/fracTime)
 
-- [Installation Guide](https://wayy-research.github.io/fractime/getting-started/installation/)
-- [Quick Start Tutorial](https://wayy-research.github.io/fractime/getting-started/quickstart/)
-- [API Reference](https://wayy-research.github.io/fractime/api/core/)
-- [Examples](https://wayy-research.github.io/fractime/examples/basic/)
+- [Installation Guide](https://wayy-research.github.io/fracTime/getting-started/installation/)
+- [Quick Start Tutorial](https://wayy-research.github.io/fracTime/getting-started/quickstart/)
+- [API Reference](https://wayy-research.github.io/fracTime/api/core/)
+- [Examples](https://wayy-research.github.io/fracTime/examples/basic/)
 
 ## License
 
