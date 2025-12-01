@@ -13,17 +13,13 @@ authors = [
     { name = "RC Galbo", email = "rcgalbo@gmail.com" }
 ]
 keywords = ["finance", "forecasting", "fractals", "time-series", "quantitative-finance", "chaos-theory", "hurst-exponent"]
-
-[project.urls]
-Homepage = "https://github.com/Wayy-Research/fractime"
-Documentation = "https://wayy-research.github.io/fractime"
-Repository = "https://github.com/Wayy-Research/fractime"
-Issues = "https://github.com/Wayy-Research/fractime/issues"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Office/Business :: Financial",
 ]
@@ -41,6 +37,12 @@ dependencies = [
     "statsmodels>=0.14.4",
     "yfinance>=0.2.54",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Wayy-Research/fractime"
+Documentation = "https://wayy-research.github.io/fractime"
+Repository = "https://github.com/Wayy-Research/fractime"
+Issues = "https://github.com/Wayy-Research/fractime/issues"
 
 [project.optional-dependencies]
 ml-extra = [
