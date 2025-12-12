@@ -20,6 +20,14 @@ from .analysis import FractalAnalyzer, CrossDimensionalAnalyzer
 # Simulation tools (refactored into separate module)
 from .simulation import FractalSimulator, TradingTimeWarper, PathAnalyzer
 
+# Exogenous predictors
+from .exogenous import (
+    ExogenousHandler,
+    ExogenousRegimeModifier,
+    ExogenousForecastAdjuster,
+    compute_exogenous_fractal_coherence
+)
+
 # Visualization tools (refactored into separate module)
 from .visualization import (
     FractalVisualizer,
@@ -43,7 +51,7 @@ except (ImportError, NameError):
     _BAYESIAN_AVAILABLE = False
     BayesianFractalForecaster = None
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Top-level API - most commonly used classes and functions
 __all__ = [
@@ -64,6 +72,12 @@ __all__ = [
     'FractalSimulator',
     'TradingTimeWarper',
     'PathAnalyzer',
+
+    # Exogenous predictors
+    'ExogenousHandler',
+    'ExogenousRegimeModifier',
+    'ExogenousForecastAdjuster',
+    'compute_exogenous_fractal_coherence',
 
     # Ensemble methods (advanced)
     'StackingForecaster',

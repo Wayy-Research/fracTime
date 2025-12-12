@@ -64,6 +64,7 @@ nav:
       - Ensemble Methods: guide/ensemble.md
   - API Reference:
       - Core: api/core.md
+      - Exogenous Predictors: api/exogenous.md
       - Baselines: api/baselines.md
       - Backtesting: api/backtesting.md
       - Selection: api/selection.md

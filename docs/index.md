@@ -1,6 +1,6 @@
 # FracTime
 
-Fractal-based time series forecasting with ensemble methods and rigorous backtesting.
+Fractal-based time series forecasting with ensemble methods, exogenous predictors, and interactive visualizations.
 
 FracTime uses fractal geometry and chaos theory to create accurate forecasts. Unlike traditional methods that assume normal distributions and independence, FracTime captures long-term memory, self-similarity, and regime changes in time series data.
 
@@ -21,12 +21,29 @@ Real-world time series often violate these assumptions. FracTime recognizes that
 
 ## Features
 
-- **Fractal Forecasting**: Hurst exponent, fractal dimension, long-term memory modeling
+### Core Forecasting
+- **Fractal Analysis**: Hurst exponent, fractal dimension, long-term memory modeling
+- **Monte Carlo Simulation**: Generate thousands of potential future paths
+- **Probability Weighting**: Paths weighted by fractal similarity to historical patterns
+- **Trading Time Warping**: Mandelbrot's concept of market time dilation
+
+### Interactive Visualization (New in v0.2.0)
+- **Path Density Plots**: See clusters of high-probability paths
+- **Color-coded Density**: Purple (low probability) to yellow (high probability)
+- **Percentile Overlays**: 5th, 25th, 50th, 75th, 95th percentile lines
+- **Fully Interactive**: Zoom, pan, hover for details (Plotly-based)
+
+### Exogenous Predictors (New in v0.2.0)
+- **External Variables**: Condition forecasts on market indicators, economic data
+- **Automatic Lag Selection**: Finds optimal lag for each predictor
+- **Regime Detection**: Identifies how exogenous states affect returns
+- **Fractal Coherence**: Analyze alignment between target and predictors
+
+### Model Comparison
 - **Baseline Models**: ARIMA, ETS, GARCH, Prophet, VAR, LSTM
+- **ML Models**: Random Forest, XGBoost, SVR, KNN
 - **Ensemble Methods**: Stacking and boosting for robust predictions
 - **Backtesting**: Walk-forward validation with comprehensive metrics
-- **Model Selection**: Automatic selection with statistical significance testing
-- **Bayesian Inference**: Full posterior distributions with PyMC (optional)
 
 ## Quick Example
 
@@ -42,12 +59,36 @@ forecaster = ft.FractalForecaster()
 forecaster.fit(prices)
 result = forecaster.predict(n_steps=30)
 
-# Visualize
-fig = ft.plot_forecast(prices, result['forecast'], result['paths'])
+# Interactive visualization with path density
+fig = ft.plot_forecast(prices, result, colorscale='Viridis')
 fig.show()
 
-print(f"Forecast: {result['forecast'][-1]:.2f}")
+print(f"Forecast: {result['weighted_forecast'][-1]:.2f}")
 print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
+```
+
+## With Exogenous Predictors
+
+```python
+import fractime as ft
+import pandas as pd
+
+# Target and exogenous data
+target = spy_prices
+exogenous = pd.DataFrame({
+    'VIX': vix_prices,
+    'TLT': bond_prices
+})
+
+# Fit with exogenous support
+forecaster = ft.FractalForecaster(use_exogenous=True)
+forecaster.fit(target, dates=dates, exogenous=exogenous)
+
+# View exogenous analysis
+print(forecaster.get_exogenous_summary())
+
+# Predict
+result = forecaster.predict(n_steps=30)
 ```
 
 ## Installation
@@ -56,16 +97,19 @@ print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
 pip install fractime
 ```
 
-For additional features:
+All dependencies are included by default.
 
-```bash
-pip install fractime[baselines]  # ARIMA, GARCH, Prophet
-pip install fractime[bayesian]   # Bayesian forecasting with PyMC
-pip install fractime[all]        # Everything
-```
+## What's New in v0.2.0
+
+- **Interactive Visualizations**: All plots now use Plotly for full interactivity
+- **Path Density Coloring**: See probability clusters in forecast paths
+- **Exogenous Predictors**: Condition forecasts on external variables
+- **Fractal Coherence Analysis**: Analyze alignment between series
 
 ## Next Steps
 
 - [Installation Guide](getting-started/installation.md)
 - [Quick Start Tutorial](getting-started/quickstart.md)
 - [Core Concepts](guide/concepts.md)
+- [Exogenous Predictors](api/exogenous.md)
+- [Visualization Guide](api/visualization.md)

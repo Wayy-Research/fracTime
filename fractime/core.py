@@ -3437,9 +3437,22 @@ class FractalForecaster:
 
     Combines fractal analysis, pattern recognition, and regime detection
     to create accurate time series forecasts.
+
+    Supports exogenous predictors for conditioning forecasts on external
+    variables like economic indicators, market indices, or correlated series.
     """
 
-    def __init__(self, lookback: int = 252, method: str = 'rs', min_scale: int = 10, max_scale: int = 100):
+    def __init__(
+        self,
+        lookback: int = 252,
+        method: str = 'rs',
+        min_scale: int = 10,
+        max_scale: int = 100,
+        use_exogenous: bool = False,
+        exog_max_lags: int = 10,
+        exog_min_correlation: float = 0.1,
+        exog_adjustment_strength: float = 0.3
+    ):
         """
         Initialize the forecaster.
 
@@ -3448,6 +3461,10 @@ class FractalForecaster:
             method: Hurst exponent calculation method ('rs' or 'dfa')
             min_scale: Minimum scale for fractal analysis
             max_scale: Maximum scale for fractal analysis
+            use_exogenous: Whether to use exogenous predictors
+            exog_max_lags: Maximum lags for exogenous variable analysis
+            exog_min_correlation: Minimum correlation to include exog variable
+            exog_adjustment_strength: How strongly exogenous vars affect paths (0-1)
         """
         self.lookback = lookback
         self.method = method
@@ -3460,6 +3477,16 @@ class FractalForecaster:
         self.frequency = None
         self.hurst = None
         self.fractal_dim = None
+
+        # Exogenous predictors
+        self.use_exogenous = use_exogenous
+        self.exog_max_lags = exog_max_lags
+        self.exog_min_correlation = exog_min_correlation
+        self.exog_adjustment_strength = exog_adjustment_strength
+        self.exog_handler = None
+        self.exog_regime_modifier = None
+        self.exog_data = None
+        self.exog_names = None
 
     def _infer_frequency(self, dates: np.ndarray) -> str:
         """
@@ -3510,13 +3537,20 @@ class FractalForecaster:
         else:
             return 'D'
 
-    def fit(self, prices: np.ndarray, dates: np.ndarray = None):
+    def fit(
+        self,
+        prices: np.ndarray,
+        dates: np.ndarray = None,
+        exogenous = None
+    ):
         """
         Fit the forecaster to historical data.
 
         Args:
             prices: Historical price series
             dates: Optional datetime array matching prices length
+            exogenous: Optional exogenous variables (array, DataFrame, or dict)
+                      Each column/key is a separate exogenous predictor
         """
         prices = _ensure_numpy_array(prices)
         self.prices_history = prices[-self.lookback:] if len(prices) > self.lookback else prices
@@ -3534,10 +3568,78 @@ class FractalForecaster:
         self.hurst = self.analyzer.compute_hurst(self.prices_history)
         self.fractal_dim = self.analyzer.compute_fractal_dimension(self.prices_history)
 
+        # Handle exogenous variables
+        if exogenous is not None or self.use_exogenous:
+            self._fit_exogenous(exogenous)
+
         # Initialize simulator
         self.simulator = FractalSimulator(self.prices_history, self.analyzer)
 
         return self
+
+    def _fit_exogenous(self, exogenous):
+        """
+        Fit exogenous variable handler and regime modifier.
+
+        Args:
+            exogenous: Exogenous data (array, DataFrame, or dict)
+        """
+        if exogenous is None:
+            return
+
+        from .exogenous import ExogenousHandler, ExogenousRegimeModifier
+
+        # Initialize and fit exogenous handler
+        self.exog_handler = ExogenousHandler(
+            max_lags=self.exog_max_lags,
+            min_correlation=self.exog_min_correlation,
+            use_differences=True,
+            scale_features=True
+        )
+        self.exog_handler.fit(self.prices_history, exogenous)
+
+        # Store exogenous data
+        import pandas as pd
+        if isinstance(exogenous, pd.DataFrame):
+            self.exog_data = exogenous.values[-self.lookback:] if len(exogenous) > self.lookback else exogenous.values
+            self.exog_names = list(exogenous.columns)
+        elif isinstance(exogenous, dict):
+            self.exog_names = list(exogenous.keys())
+            self.exog_data = np.column_stack([
+                exogenous[name][-self.lookback:] if len(exogenous[name]) > self.lookback else exogenous[name]
+                for name in self.exog_names
+            ])
+        else:
+            exogenous = _ensure_numpy_array(exogenous)
+            if exogenous.ndim == 1:
+                exogenous = exogenous.reshape(-1, 1)
+            self.exog_data = exogenous[-self.lookback:] if len(exogenous) > self.lookback else exogenous
+            self.exog_names = [f'exog_{i}' for i in range(self.exog_data.shape[1])]
+
+        # Fit regime modifier
+        try:
+            X, target_aligned = self.exog_handler.get_feature_matrix(self.prices_history)
+            if X.shape[1] > 0:  # Have valid features
+                target_returns = np.diff(np.log(target_aligned))
+                X = X[1:]  # Align with returns
+
+                self.exog_regime_modifier = ExogenousRegimeModifier(n_regimes=3)
+                self.exog_regime_modifier.fit(target_returns, X)
+        except Exception as e:
+            import warnings
+            warnings.warn(f"Could not fit exogenous regime modifier: {e}")
+            self.exog_regime_modifier = None
+
+    def get_exogenous_summary(self):
+        """
+        Get summary of exogenous variable analysis.
+
+        Returns:
+            Dictionary with exogenous analysis results, or None if not fitted
+        """
+        if self.exog_handler is None:
+            return None
+        return self.exog_handler.get_summary()
 
     def _remove_duplicate_paths(self, paths: np.ndarray, probabilities: np.ndarray = None,
                                  add_noise: bool = True, noise_scale: float = 1e-6) -> Tuple[np.ndarray, np.ndarray]:
@@ -3847,6 +3949,26 @@ class FractalForecaster:
 
         # Calculate path probabilities based on fractal similarity
         probabilities = self._calculate_path_probabilities(paths)
+
+        # Apply exogenous adjustments if fitted
+        if self.exog_handler is not None and self.exog_regime_modifier is not None:
+            try:
+                # Get current exogenous features
+                X, _ = self.exog_handler.get_feature_matrix(self.prices_history)
+                if X.shape[1] > 0:
+                    # Use most recent feature vector
+                    current_exog = X[-1:, :]
+
+                    # Adjust probabilities based on exogenous regime
+                    probabilities = self.exog_regime_modifier.adjust_path_probabilities(
+                        paths,
+                        probabilities,
+                        current_exog,
+                        adjustment_strength=self.exog_adjustment_strength
+                    )
+            except Exception as e:
+                import warnings
+                warnings.warn(f"Could not apply exogenous adjustment: {e}")
 
         # Calculate statistics
         alpha = (1 - confidence) / 2
