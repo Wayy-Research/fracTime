@@ -101,3 +101,8 @@ Our research combines theoretical development with empirical validation:
 - What is the most effective definition of "path probability" that doesn't rely on deep learning?
 - Can we consistently outperform tuned SARIMA models?
 - How does trading time warping improve our ability to anticipate regime changes?
+
+
+# Future Research
+
+- Potential path clustering into groups and probabilities of any group occuring
