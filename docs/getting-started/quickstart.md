@@ -1,114 +1,162 @@
 # Quick Start
 
-This guide walks through the basic FracTime workflow.
+Get started with FracTime in 5 minutes.
 
-## Basic Workflow
+---
 
-### 1. Load Data
+## Basic Analysis
 
 ```python
 import fractime as ft
 import numpy as np
 
-# Option 1: Use the built-in Yahoo Finance loader
-prices, dates = ft.get_yahoo_data('AAPL', period='2y')
+# Create sample data (or use your own prices)
+np.random.seed(42)
+prices = 100 * np.cumprod(1 + np.random.randn(500) * 0.02)
 
-# Option 2: Your own data
-prices = np.array([100, 102, 101, 105, 103, 108, ...])
+# Create analyzer
+analyzer = ft.Analyzer(prices)
+
+# Get fractal properties
+print(f"Hurst exponent: {analyzer.hurst}")
+print(f"Fractal dimension: {analyzer.fractal_dim}")
+print(f"Volatility: {analyzer.volatility}")
+print(f"Regime: {analyzer.regime}")
 ```
 
-### 2. Analyze Fractal Properties
+Output:
+
+```
+Hurst exponent: hurst=0.5723
+Fractal dimension: fractal_dim=1.4277
+Volatility: volatility=0.1892
+Regime: trending
+```
+
+---
+
+## Understanding Results
+
+### Hurst Exponent
+
+The Hurst exponent (H) measures long-term memory:
+
+| Value | Interpretation | Market Behavior |
+|-------|----------------|-----------------|
+| H < 0.5 | Anti-persistent | Mean-reverting |
+| H = 0.5 | Random walk | No memory |
+| H > 0.5 | Persistent | Trending |
+
+### Regime Detection
+
+FracTime classifies the current regime:
+
+- **trending**: H > 0.55 - momentum strategies work
+- **mean_reverting**: H < 0.45 - reversion strategies work
+- **random**: 0.45 ≤ H ≤ 0.55 - no clear pattern
+
+---
+
+## Three Views
+
+Every metric supports three views:
+
+### 1. Point Estimate
 
 ```python
-# Understand your data's characteristics
-analyzer = ft.FractalAnalyzer()
-hurst = analyzer.compute_hurst(prices)
-
-print(f"Hurst exponent: {hurst:.3f}")
-if hurst > 0.5:
-    print("Series is trending (persistent)")
-elif hurst < 0.5:
-    print("Series is mean-reverting (anti-persistent)")
-else:
-    print("Series is a random walk")
+# Single value
+hurst_value = analyzer.hurst.value
+print(f"Hurst: {hurst_value:.4f}")
 ```
 
-### 3. Fit and Forecast
+### 2. Rolling Series
+
+```python
+# Values over time (Polars DataFrame)
+rolling = analyzer.hurst.rolling
+print(rolling)
+# ┌─────────────────────┬──────────┐
+# │ index               │ value    │
+# ├─────────────────────┼──────────┤
+# │ 63                  │ 0.5823   │
+# │ 64                  │ 0.5891   │
+# │ ...                 │ ...      │
+# └─────────────────────┴──────────┘
+```
+
+### 3. Bootstrap Distribution
+
+```python
+# Uncertainty quantification
+ci = analyzer.hurst.ci(0.95)
+print(f"95% CI: ({ci[0]:.3f}, {ci[1]:.3f})")
+
+std = analyzer.hurst.std
+print(f"Standard error: {std:.4f}")
+```
+
+---
+
+## Forecasting
 
 ```python
 # Create forecaster
-forecaster = ft.FractalForecaster()
-forecaster.fit(prices)
+model = ft.Forecaster(prices)
 
-# Generate forecast with uncertainty
-result = forecaster.predict(n_steps=30, n_paths=1000)
+# Generate forecast
+result = model.predict(steps=30, n_paths=1000)
 
 # Access results
-print(f"Point forecast: {result['forecast'][-1]:.2f}")
-print(f"95% CI: [{result['lower'][-1]:.2f}, {result['upper'][-1]:.2f}]")
+print(f"Forecast: {result.forecast[-1]:.2f}")
+print(f"Mean: {result.mean[-1]:.2f}")
+
+# Confidence interval
+lower, upper = result.ci(0.95)
+print(f"95% CI: ({lower[-1]:.2f}, {upper[-1]:.2f})")
 ```
 
-### 4. Visualize
+---
+
+## Visualization
 
 ```python
-# Interactive plot
-chart = ft.plot_forecast_interactive(
-    prices=prices,
-    result=result,
-    title="30-Day Forecast"
-)
-chart.show()
+# Plot forecast
+ft.plot(result)
 
-# Static plot
-fig = ft.plot_forecast(
-    prices=prices,
-    forecast=result['forecast'],
-    paths=result['paths']
-)
-fig.show()
+# Plot analysis dashboard
+ft.plot(analyzer)
+
+# Plot single metric
+ft.plot(analyzer.hurst)
+
+# Plot rolling values
+ft.plot(analyzer.hurst, view='rolling')
+
+# Plot bootstrap distribution
+ft.plot(analyzer.hurst, view='distribution')
 ```
 
-## Date-Based Forecasting
+---
 
-If you have date information:
+## Convenience Functions
+
+For quick one-liners:
 
 ```python
-forecaster = ft.FractalForecaster()
-forecaster.fit(prices, dates=dates)
+# Quick analysis
+result = ft.analyze(prices)
+print(result.summary())
 
-# Forecast to a specific date
-result = forecaster.predict(end_date='2025-12-31')
-
-# Or by period
-result = forecaster.predict(period='2w')  # 2 weeks
-result = forecaster.predict(period='1M')  # 1 month
+# Quick forecast
+forecast = ft.forecast(prices, steps=30)
+print(forecast.forecast)
 ```
 
-## Compare Models
-
-```python
-from fractime.baselines import ARIMAForecaster, ETSForecaster
-from fractime.backtesting import compare_models
-
-comparison = compare_models(
-    models={
-        'Fractal': ft.FractalForecaster(),
-        'ARIMA': ARIMAForecaster(),
-        'ETS': ETSForecaster()
-    },
-    prices=prices,
-    dates=dates,
-    initial_window=252,
-    step_size=20,
-    forecast_horizon=10
-)
-
-for name, metrics in comparison.items():
-    print(f"{name}: RMSE={metrics['rmse']:.2f}, MAE={metrics['mae']:.2f}")
-```
+---
 
 ## Next Steps
 
-- [Core Concepts](../guide/concepts.md) - Understanding fractal analysis
-- [Backtesting Guide](../guide/backtesting.md) - Rigorous model validation
-- [API Reference](../api/core.md) - Complete API documentation
+- [Core Concepts](../guide/concepts.md) - Understand fractal analysis
+- [Forecasting Guide](../guide/forecasting.md) - Advanced forecasting
+- [API Reference](../api/analyzer.md) - Complete documentation
+- [Examples](../examples/basic.md) - Real-world usage

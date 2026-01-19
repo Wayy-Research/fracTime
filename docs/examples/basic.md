@@ -1,14 +1,17 @@
-# Basic Forecasting Example
+# Basic Analysis Example
 
-A complete walkthrough of fractal-based forecasting.
+A complete walkthrough of fractal analysis with FracTime.
+
+---
 
 ## Setup
 
 ```python
 import fractime as ft
 import numpy as np
-import matplotlib.pyplot as plt
 ```
+
+---
 
 ## Generate Sample Data
 
@@ -21,116 +24,213 @@ n = 500
 trend = np.linspace(0, 20, n)
 noise = np.random.randn(n).cumsum() * 0.5
 prices = 100 + trend + noise
+
+print(f"Data points: {len(prices)}")
+print(f"Price range: {prices.min():.2f} - {prices.max():.2f}")
 ```
+
+---
 
 ## Analyze Fractal Properties
 
 ```python
 # Create analyzer
-analyzer = ft.FractalAnalyzer()
+analyzer = ft.Analyzer(prices)
 
-# Compute Hurst exponent
-hurst = analyzer.compute_hurst(prices)
-print(f"Hurst Exponent: {hurst:.3f}")
+# Get point estimates
+print(f"Hurst Exponent: {analyzer.hurst.value:.4f}")
+print(f"Fractal Dimension: {analyzer.fractal_dim.value:.4f}")
+print(f"Volatility: {analyzer.volatility.value:.2%}")
+print(f"Regime: {analyzer.regime}")
+```
 
-# Interpret
-if hurst > 0.5:
-    print("Series is persistent (trending)")
-elif hurst < 0.5:
-    print("Series is anti-persistent (mean-reverting)")
+### Interpret Results
+
+```python
+h = analyzer.hurst.value
+
+if h > 0.55:
+    print("Series is TRENDING (persistent)")
+    print("→ Past trends tend to continue")
+    print("→ Momentum strategies may work")
+elif h < 0.45:
+    print("Series is MEAN-REVERTING (anti-persistent)")
+    print("→ Movements tend to reverse")
+    print("→ Reversion strategies may work")
 else:
-    print("Series is a random walk")
-
-# Full analysis
-analysis = analyzer.analyze(prices)
-print(f"Fractal Dimension: {analysis['fractal_dim']:.3f}")
+    print("Series is RANDOM (no memory)")
+    print("→ No clear pattern")
+    print("→ Difficult to predict")
 ```
 
-## Fit Forecaster
+---
+
+## Uncertainty Quantification
 
 ```python
-# Create and fit
-forecaster = ft.FractalForecaster(lookback=252)
-forecaster.fit(prices)
+# Get confidence intervals
+h_ci = analyzer.hurst.ci(0.95)
+fd_ci = analyzer.fractal_dim.ci(0.95)
 
-# Check fitted parameters
-print(f"Fitted Hurst: {forecaster.hurst:.3f}")
-print(f"Fitted Fractal Dim: {forecaster.fractal_dim:.3f}")
+print(f"\nHurst: {analyzer.hurst.value:.4f}")
+print(f"  95% CI: ({h_ci[0]:.4f}, {h_ci[1]:.4f})")
+print(f"  Std Error: {analyzer.hurst.std:.4f}")
+
+print(f"\nFractal Dim: {analyzer.fractal_dim.value:.4f}")
+print(f"  95% CI: ({fd_ci[0]:.4f}, {fd_ci[1]:.4f})")
 ```
 
-## Generate Forecast
+---
+
+## Rolling Analysis
 
 ```python
-# Forecast 30 steps ahead
-result = forecaster.predict(
-    n_steps=30,
-    n_paths=1000,
-    confidence=0.95
+import datetime
+
+# Create dates
+dates = [datetime.datetime(2023, 1, 1) + datetime.timedelta(days=i)
+         for i in range(len(prices))]
+
+# Analyzer with rolling window
+analyzer = ft.Analyzer(prices, dates=dates, window=63)
+
+# Get rolling Hurst
+rolling_hurst = analyzer.hurst.rolling
+print(rolling_hurst.head())
+```
+
+### Classify Periods
+
+```python
+import polars as pl
+
+# Add regime classification
+result = rolling_hurst.with_columns(
+    pl.when(pl.col('value') > 0.55)
+      .then(pl.lit('trending'))
+      .when(pl.col('value') < 0.45)
+      .then(pl.lit('mean_reverting'))
+      .otherwise(pl.lit('random'))
+      .alias('regime')
 )
 
-# Access results
-forecast = result['forecast']
-lower = result['lower']
-upper = result['upper']
-paths = result['paths']
-
-print(f"Final forecast: {forecast[-1]:.2f}")
-print(f"95% CI: [{lower[-1]:.2f}, {upper[-1]:.2f}]")
+# Count regimes
+regime_counts = result.group_by('regime').count()
+print(regime_counts)
 ```
 
-## Visualize
+---
+
+## Regime Probabilities
 
 ```python
-# Interactive plot (Plotly)
-chart = ft.plot_forecast_interactive(
-    prices=prices,
-    result=result,
-    title="30-Step Fractal Forecast",
-    top_n_paths=20
-)
-chart.show()
-
-# Static plot (Matplotlib)
-fig = ft.plot_forecast(
-    prices=prices[-100:],  # Last 100 points
-    forecast=forecast,
-    paths=paths,
-    confidence_intervals=result,
-    title="30-Step Forecast"
-)
-plt.show()
+# Bootstrap-based regime probabilities
+probs = analyzer.regime_probabilities
+print("\nRegime Probabilities:")
+for regime, prob in probs.items():
+    print(f"  {regime}: {prob:.1%}")
 ```
 
-## Print Summary
+---
+
+## Multi-Dimensional Analysis
 
 ```python
-ft.print_forecast_summary(
-    result,
-    current_price=prices[-1],
-    show_paths=10
-)
+# Generate volume data
+np.random.seed(43)
+volumes = np.random.randint(1000, 10000, n).astype(float)
+
+# Analyze multiple series together
+multi_analyzer = ft.Analyzer({
+    'price': prices,
+    'volume': volumes,
+})
+
+print(f"\nDimensions: {multi_analyzer.dimensions}")
+
+# Individual analysis
+for dim in multi_analyzer.dimensions:
+    h = multi_analyzer[dim].hurst.value
+    print(f"{dim}: H={h:.4f}")
+
+# Cross-dimensional coherence
+print(f"\nCoherence: {multi_analyzer.coherence.value:.4f}")
 ```
 
-## Analyze Probabilities
+---
+
+## Visualization
 
 ```python
-# Get path probabilities
-probs = result['probabilities']
-final_values = paths[:, -1]
-current = prices[-1]
+# Analysis dashboard
+ft.plot(analyzer, title="Fractal Analysis Dashboard")
 
-# Probability of increase
-prob_up = np.sum(probs[final_values > current])
-print(f"Probability of increase: {prob_up:.1%}")
+# Rolling Hurst
+ft.plot(analyzer.hurst, view='rolling', title="Rolling Hurst Exponent")
 
-# Most likely outcome
-most_likely_idx = np.argmax(probs)
-most_likely = final_values[most_likely_idx]
-print(f"Most likely outcome: {most_likely:.2f}")
-
-# Probability-weighted VaR
-sorted_idx = np.argsort(final_values)
-cumsum = np.cumsum(probs[sorted_idx])
-var_5 = final_values[sorted_idx[np.searchsorted(cumsum, 0.05)]]
-print(f"5% VaR: {var_5:.2f}")
+# Bootstrap distribution
+ft.plot(analyzer.hurst, view='distribution', title="Hurst Distribution")
 ```
+
+---
+
+## Export Results
+
+```python
+# Get AnalysisResult
+result = analyzer.result
+
+# Print summary
+print(result.summary())
+
+# Export to DataFrame
+df = result.to_frame()
+print(df)
+
+# Save to file
+df.write_csv("analysis_results.csv")
+```
+
+---
+
+## Complete Script
+
+```python
+import fractime as ft
+import numpy as np
+import datetime
+
+# 1. Generate data
+np.random.seed(42)
+n = 500
+prices = 100 + np.linspace(0, 20, n) + np.random.randn(n).cumsum() * 0.5
+dates = [datetime.datetime(2023, 1, 1) + datetime.timedelta(days=i)
+         for i in range(n)]
+
+# 2. Create analyzer
+analyzer = ft.Analyzer(prices, dates=dates, window=63, n_samples=1000)
+
+# 3. Get results
+print("=== Fractal Analysis ===")
+print(f"Hurst: {analyzer.hurst.value:.4f} (CI: {analyzer.hurst.ci(0.95)})")
+print(f"Fractal Dim: {analyzer.fractal_dim.value:.4f}")
+print(f"Volatility: {analyzer.volatility.value:.2%}")
+print(f"Regime: {analyzer.regime}")
+
+# 4. Regime probabilities
+print("\nRegime Probabilities:")
+for regime, prob in analyzer.regime_probabilities.items():
+    print(f"  {regime}: {prob:.1%}")
+
+# 5. Visualize
+ft.plot(analyzer, title="Analysis Dashboard")
+ft.plot(analyzer.hurst, view='rolling', title="Rolling Hurst")
+```
+
+---
+
+## Next Steps
+
+- [Forecasting Example](comparison.md) - Generate forecasts
+- [Advanced Usage](real-world.md) - Real-world applications
+- [API Reference](../api/analyzer.md) - Complete documentation

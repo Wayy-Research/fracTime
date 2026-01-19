@@ -1,109 +1,253 @@
 # Ensemble Methods
 
-Combining multiple models for robust predictions.
+Combining multiple forecasters for robust predictions.
+
+---
 
 ## Why Ensembles?
 
-- Reduce variance by averaging predictions
-- Capture different aspects of the data
-- More robust to model misspecification
+Single models can be brittle. Ensembles provide:
 
-## Stacking Ensemble
+- **Reduced variance** by averaging predictions
+- **Better generalization** by capturing different patterns
+- **Robustness** to model misspecification
 
-Meta-learning approach that learns optimal model weights:
+---
+
+## Basic Usage
 
 ```python
-from fractime import FractalForecaster, StackingForecaster
-from fractime.baselines import ARIMAForecaster, ETSForecaster
+import fractime as ft
 
-# Create base models
-models = [
-    FractalForecaster(),
-    ARIMAForecaster(),
-    ETSForecaster()
-]
+# Create ensemble with default models
+ensemble = ft.Ensemble(prices)
 
-# Create stacking ensemble
-stacker = StackingForecaster(
-    base_models=models,
-    meta_learner='ridge',  # 'ridge', 'linear', or 'rf'
-    n_splits=5
-)
+# Generate forecast
+result = ensemble.predict(steps=30, n_paths=500)
 
-# Fit (fits base models + meta-learner)
-stacker.fit(prices)
-
-# Predict
-result = stacker.predict(n_steps=30)
-
-# Check learned weights
-weights = stacker.get_model_weights()
-print(f"Model contributions: {weights}")
+# Access results (same as Forecaster)
+print(f"Forecast: {result.forecast[-1]:.2f}")
+print(f"95% CI: {result.ci(0.95)}")
 ```
 
-### Meta-Learner Options
+---
+
+## Default Ensemble
+
+When you create an Ensemble without specifying models, it creates:
+
+1. **R/S Forecaster** - Rescaled Range method
+2. **DFA Forecaster** - Detrended Fluctuation Analysis
+3. **Weighted Forecaster** - Custom path weights
+
+```python
+ensemble = ft.Ensemble(prices)
+print(f"Number of models: {ensemble.n_models}")  # 3
+```
+
+---
+
+## Custom Models
+
+Specify your own combination of forecasters:
+
+```python
+models = [
+    ft.Forecaster(prices, method='rs'),
+    ft.Forecaster(prices, method='dfa'),
+    ft.Forecaster(prices, time_warp=True),
+]
+
+ensemble = ft.Ensemble(prices, models=models)
+result = ensemble.predict(steps=30)
+```
+
+---
+
+## Combination Strategies
+
+### Average
+
+Simple average of all models:
+
+```python
+ensemble = ft.Ensemble(prices, strategy='average')
+```
+
+Each model contributes equally to the final forecast.
+
+### Weighted (Default)
+
+Models weighted by forecast diversity:
+
+```python
+ensemble = ft.Ensemble(prices, strategy='weighted')
+result = ensemble.predict(steps=30)
+
+# See model weights
+print(result.metadata['model_weights'])
+```
+
+Models with more diverse (less correlated) forecasts get higher weights.
+
+### Stacking
+
+Meta-learner combines model predictions:
+
+```python
+ensemble = ft.Ensemble(
+    prices,
+    strategy='stacking',
+    meta_learner='ridge'  # or 'linear', 'rf'
+)
+```
 
 | Meta-Learner | Description |
 |--------------|-------------|
-| `'ridge'` | Ridge regression (default, handles multicollinearity) |
+| `'ridge'` | Ridge regression (default) |
 | `'linear'` | Linear regression |
-| `'rf'` | Random forest (captures non-linear combinations) |
+| `'rf'` | Random forest |
 
-## Boosting Ensemble
+### Boosting
 
-Sequential error correction where each model focuses on previous mistakes:
+Sequential error correction:
 
 ```python
-from fractime import BoostingForecaster
-from fractime import FractalForecaster
-from fractime.baselines import ARIMAForecaster, ETSForecaster
+ensemble = ft.Ensemble(prices, strategy='boosting')
+```
 
-# Define model configurations
-configs = [
-    (FractalForecaster, {}),
-    (ARIMAForecaster, {}),
-    (ETSForecaster, {'trend': 'add'})
+Each model corrects the residuals of previous models.
+
+---
+
+## Ensemble Parameters
+
+```python
+ensemble = ft.Ensemble(
+    data,                  # Price series (required)
+    dates=None,            # Optional date array
+    models=None,           # List of Forecaster instances
+    strategy='weighted',   # Combination strategy
+    meta_learner='ridge',  # For stacking strategy
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | array | required | Historical price series |
+| `dates` | array | None | Corresponding dates |
+| `models` | list | None | Custom forecasters |
+| `strategy` | str | 'weighted' | How to combine models |
+| `meta_learner` | str | 'ridge' | For stacking only |
+
+---
+
+## Accessing Ensemble State
+
+```python
+# List of models
+models = ensemble.models
+
+# Number of models
+n = ensemble.n_models
+
+# Individual model forecasts
+for model in ensemble.models:
+    result = model.predict(steps=30)
+    print(f"Hurst: {model.hurst}")
+```
+
+---
+
+## Choosing a Strategy
+
+| Strategy | Best When |
+|----------|-----------|
+| **average** | Models are equally good, want simple combination |
+| **weighted** | Want diversity-based weighting, general use |
+| **stacking** | Have validation data, want learned combination |
+| **boosting** | Series has complex structure, want iterative refinement |
+
+---
+
+## Example: Comparing Strategies
+
+```python
+import fractime as ft
+import numpy as np
+
+# Your data
+prices = ...
+
+# Try different strategies
+strategies = ['average', 'weighted', 'stacking', 'boosting']
+
+results = {}
+for strategy in strategies:
+    ensemble = ft.Ensemble(prices, strategy=strategy)
+    result = ensemble.predict(steps=30, n_paths=500)
+    results[strategy] = result.forecast
+
+# Compare final forecasts
+for name, forecast in results.items():
+    print(f"{name}: {forecast[-1]:.2f}")
+```
+
+---
+
+## Example: Diverse Model Ensemble
+
+Create an ensemble with deliberately diverse models:
+
+```python
+models = [
+    # Different Hurst methods
+    ft.Forecaster(prices, method='rs'),
+    ft.Forecaster(prices, method='dfa'),
+
+    # With time warping
+    ft.Forecaster(prices, time_warp=True),
+
+    # Different path weights
+    ft.Forecaster(prices, path_weights={
+        'hurst': 0.7,
+        'volatility': 0.2,
+        'pattern': 0.1,
+    }),
 ]
 
-# Create boosting ensemble
-booster = BoostingForecaster(
-    base_model_configs=configs,
-    n_estimators=5,
-    learning_rate=0.1
-)
+ensemble = ft.Ensemble(prices, models=models, strategy='weighted')
+result = ensemble.predict(steps=30, n_paths=500)
 
-# Fit
-booster.fit(prices)
-
-# Predict
-result = booster.predict(n_steps=30)
-
-# Model weights
-weights = booster.get_model_weights()
+print(f"Model weights: {result.metadata['model_weights']}")
 ```
 
-### How Boosting Works
+---
 
-1. First model fits the original series
-2. Calculate residuals (errors)
-3. Second model fits the residuals
-4. Repeat, each model correcting previous errors
-5. Final prediction is weighted sum
+## Performance Considerations
 
-## Choosing Between Methods
+### Computation Time
 
-| Method | Best When |
-|--------|-----------|
-| **Stacking** | Models capture different patterns; want optimal linear combination |
-| **Boosting** | Series has complex structure; want iterative refinement |
+Ensemble forecasting takes longer because each model generates paths:
 
-## Advanced: Custom Ensembles
+```
+Total time ≈ n_models × single_model_time
+```
+
+### Reducing Paths
+
+Use fewer paths per model when using ensembles:
 
 ```python
-from fractime.selection import EnsembleForecaster
-
-class MyEnsemble(EnsembleForecaster):
-    def combine_predictions(self, predictions):
-        # Custom combination logic
-        ...
+# Instead of 1000 paths for single model
+# Use 300-500 paths per model in ensemble
+result = ensemble.predict(steps=30, n_paths=300)
 ```
+
+---
+
+## Next Steps
+
+- [API Reference: Ensemble](../api/ensemble.md) - Complete documentation
+- [Forecaster Guide](forecasting.md) - Single model forecasting
+- [Examples](../examples/comparison.md) - Real-world comparisons

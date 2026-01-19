@@ -1,5 +1,5 @@
 site_name: FracTime
-site_description: Fractal-based time series forecasting
+site_description: Fractal-based time series analysis and forecasting
 site_url: https://wayy-research.github.io/fracTime
 repo_url: https://github.com/Wayy-Research/fracTime
 repo_name: Wayy-Research/fracTime
@@ -50,6 +50,8 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - tables
+  - toc:
+      permalink: true
 
 nav:
   - Home: index.md
@@ -59,17 +61,16 @@ nav:
   - User Guide:
       - Core Concepts: guide/concepts.md
       - Forecasting: guide/forecasting.md
-      - Backtesting: guide/backtesting.md
-      - Model Selection: guide/selection.md
       - Ensemble Methods: guide/ensemble.md
   - API Reference:
-      - Core: api/core.md
-      - Exogenous Predictors: api/exogenous.md
-      - Baselines: api/baselines.md
-      - Backtesting: api/backtesting.md
-      - Selection: api/selection.md
+      - Analyzer: api/analyzer.md
+      - Forecaster: api/forecaster.md
+      - Simulator: api/simulator.md
+      - Ensemble: api/ensemble.md
+      - Results: api/results.md
       - Visualization: api/visualization.md
   - Examples:
-      - Basic Forecasting: examples/basic.md
-      - Model Comparison: examples/comparison.md
-      - Real-World Data: examples/real-world.md
+      - Basic Analysis: examples/basic.md
+      - Forecasting: examples/comparison.md
+      - Advanced Usage: examples/real-world.md
+  - Research: RESEARCH.md

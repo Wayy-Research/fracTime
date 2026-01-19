@@ -1,92 +1,72 @@
 """
-FracTime: Advanced Time Series Forecasting with Fractal Geometry
+FracTime: Fractal-based time series analysis and forecasting.
 
-A Python package for fractal-based time series forecasting.
+Simple, composable API:
 
-Simple, flat API following the Zen of Python:
-- Beautiful is better than ugly
-- Explicit is better than implicit
-- Simple is better than complex
-- Flat is better than nested
-- Readability counts
+    >>> import fractime as ft
+
+    # Analyze
+    >>> analyzer = ft.Analyzer(prices)
+    >>> analyzer.hurst                    # Point estimate
+    >>> analyzer.hurst.rolling            # Rolling values
+    >>> analyzer.hurst.ci(0.95)           # Confidence interval
+
+    # Forecast
+    >>> model = ft.Forecaster(prices)
+    >>> result = model.predict(steps=30)
+    >>> result.forecast                   # Primary forecast
+    >>> result.ci(0.95)                   # Confidence interval
+
+    # Plot
+    >>> ft.plot(result)
+
+All components are composable:
+    - Analyzer: Compute fractal properties (Hurst, fractal dim, volatility)
+    - Simulator: Generate Monte Carlo paths
+    - Forecaster: Probabilistic forecasting
+    - Ensemble: Combine multiple models
 """
 
-# Core forecasting (top-level imports for simplicity)
-from .core import FractalForecaster
+# Core classes
+from .analyzer import Analyzer, analyze
+from .forecaster import Forecaster, forecast
+from .simulator import Simulator
+from .ensemble import Ensemble
 
-# Analysis tools (also available at top level)
-from .analysis import FractalAnalyzer, CrossDimensionalAnalyzer
+# Result types
+from .result import Metric, AnalysisResult, ForecastResult
 
-# Simulation tools (refactored into separate module)
-from .simulation import FractalSimulator, TradingTimeWarper, PathAnalyzer
+# Visualization
+from .visualization import plot
 
-# Exogenous predictors
-from .exogenous import (
-    ExogenousHandler,
-    ExogenousRegimeModifier,
-    ExogenousForecastAdjuster,
-    compute_exogenous_fractal_coherence
-)
-
-# Visualization tools (refactored into separate module)
-from .visualization import (
-    FractalVisualizer,
-    plot_forecast,
-    plot_forecast_interactive,
-    print_forecast_summary
-)
-
-# Ensemble methods (advanced)
-from .ensemble import StackingForecaster, BoostingForecaster
-
-# Utility functions
-from .utils import get_yahoo_data
-
-# Bayesian forecasting (optional, requires PyMC)
+# Bayesian (optional - requires PyMC)
 try:
-    from .bayesian import BayesianFractalForecaster
+    from .bayesian import BayesianFractalForecaster as BayesianForecaster
     _BAYESIAN_AVAILABLE = True
-except (ImportError, NameError):
-    # PyMC not installed or other import issues
+except (ImportError, ModuleNotFoundError, NameError, Exception):
     _BAYESIAN_AVAILABLE = False
-    BayesianFractalForecaster = None
+    BayesianForecaster = None
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-# Top-level API - most commonly used classes and functions
 __all__ = [
-    # Main forecaster
-    'FractalForecaster',
+    # Core classes
+    'Analyzer',
+    'Forecaster',
+    'Simulator',
+    'Ensemble',
 
-    # Visualization
-    'plot_forecast_interactive',
-    'plot_forecast',
-    'print_forecast_summary',
-    'FractalVisualizer',
+    # Convenience functions
+    'analyze',
+    'forecast',
+    'plot',
 
-    # Analysis
-    'FractalAnalyzer',
-    'CrossDimensionalAnalyzer',
-
-    # Simulation (advanced)
-    'FractalSimulator',
-    'TradingTimeWarper',
-    'PathAnalyzer',
-
-    # Exogenous predictors
-    'ExogenousHandler',
-    'ExogenousRegimeModifier',
-    'ExogenousForecastAdjuster',
-    'compute_exogenous_fractal_coherence',
-
-    # Ensemble methods (advanced)
-    'StackingForecaster',
-    'BoostingForecaster',
-
-    # Utilities
-    'get_yahoo_data',
+    # Result types
+    'Metric',
+    'AnalysisResult',
+    'ForecastResult',
 ]
 
 # Add Bayesian if available
 if _BAYESIAN_AVAILABLE:
-    __all__.append('BayesianFractalForecaster')
+    __all__.append('BayesianForecaster')

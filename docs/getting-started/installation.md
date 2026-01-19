@@ -1,61 +1,109 @@
 # Installation
 
-## Requirements
-
-- Python 3.10 or higher
-- pip or uv package manager
-
-## Installation
-
-Install FracTime from PyPI:
+## Quick Install
 
 ```bash
 pip install fractime
 ```
 
-This installs the complete package including:
+This installs FracTime with all required dependencies.
 
-- Fractal forecasting (Hurst exponent, fractal dimension)
-- Baseline models (ARIMA, GARCH, Prophet)
-- Bayesian forecasting (PyMC)
-- Machine learning (XGBoost)
-- Ensemble methods and backtesting
+---
 
-## Development Installation
+## From Source
 
-For contributing or development:
+For the latest development version:
 
 ```bash
-git clone https://github.com/Wayy-Research/fracTime.git
+git clone https://github.com/wayy-research/fracTime.git
 cd fracTime
-pip install -e ".[dev,docs]"
+pip install -e .
 ```
 
-## Verifying Installation
+For development with testing tools:
+
+```bash
+pip install -e ".[dev]"
+```
+
+---
+
+## Dependencies
+
+FracTime automatically installs these dependencies:
+
+| Package | Purpose |
+|---------|---------|
+| **numpy** | Numerical computing |
+| **polars** | Fast DataFrames |
+| **numba** | JIT compilation for speed |
+| **plotly** | Interactive visualizations |
+| **scikit-learn** | Clustering and preprocessing |
+
+### Optional Dependencies
+
+| Package | Purpose | Install |
+|---------|---------|---------|
+| **pymc** | Bayesian forecasting | `pip install pymc` |
+
+---
+
+## Verify Installation
 
 ```python
 import fractime as ft
-print(ft.__version__)
+
+# Check version
+print(f"FracTime version: {ft.__version__}")
 
 # Quick test
 import numpy as np
-prices = np.random.randn(100).cumsum() + 100
-forecaster = ft.FractalForecaster()
-forecaster.fit(prices)
-result = forecaster.predict(n_steps=10)
-print(f"Forecast generated: {len(result['forecast'])} steps")
+prices = 100 * np.cumprod(1 + np.random.randn(100) * 0.02)
+analyzer = ft.Analyzer(prices)
+print(f"Hurst exponent: {analyzer.hurst}")
 ```
+
+Expected output:
+
+```
+FracTime version: 0.3.0
+Hurst exponent: hurst=0.5234
+```
+
+---
+
+## Platform Support
+
+FracTime supports:
+
+- **Python**: 3.10, 3.11, 3.12
+- **OS**: Linux, macOS, Windows
+- **Architecture**: x86_64, ARM64
+
+---
 
 ## Troubleshooting
 
 ### Numba Compilation
 
-On first import, Numba compiles optimized functions. This may take a few seconds but only happens once.
+On first use, Numba compiles optimized functions. This causes a one-time delay of a few seconds. Subsequent runs are fast.
 
-### PyMC on Apple Silicon
+### Memory Issues
 
-On Apple Silicon Macs, if you encounter PyMC issues:
+For very large datasets (>100,000 points), consider:
+
+```python
+# Reduce bootstrap samples
+analyzer = ft.Analyzer(prices, n_samples=500)
+
+# Use smaller rolling windows
+analyzer = ft.Analyzer(prices, window=30)
+```
+
+### Import Errors
+
+If you see import errors, ensure you have the latest version:
 
 ```bash
-conda install -c conda-forge pymc
+pip install --upgrade fractime
 ```

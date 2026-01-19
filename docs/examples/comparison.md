@@ -1,127 +1,284 @@
-# Model Comparison Example
+# Forecasting Example
 
-Comparing FracTime against baseline models.
+Complete walkthrough of probabilistic forecasting with FracTime.
+
+---
 
 ## Setup
 
 ```python
 import fractime as ft
-from fractime.baselines import ARIMAForecaster, ETSForecaster, GARCHForecaster
-from fractime.backtesting import WalkForwardValidator, compare_models
 import numpy as np
 ```
 
-## Load Data
+---
+
+## Basic Forecast
 
 ```python
-# Use Yahoo Finance data
-prices, dates = ft.get_yahoo_data('SPY', period='5y')
-print(f"Loaded {len(prices)} data points")
+# Generate sample data
+np.random.seed(42)
+prices = 100 * np.cumprod(1 + np.random.randn(500) * 0.02)
+
+# Create forecaster
+model = ft.Forecaster(prices)
+
+# Generate forecast
+result = model.predict(steps=30, n_paths=1000)
+
+# View results
+print(f"Current price: {prices[-1]:.2f}")
+print(f"30-day forecast: {result.forecast[-1]:.2f}")
+print(f"Expected return: {(result.forecast[-1]/prices[-1] - 1)*100:.1f}%")
 ```
 
-## Single Model Backtesting
+---
+
+## Confidence Intervals
 
 ```python
-# Test fractal forecaster
-validator = WalkForwardValidator(
-    model=ft.FractalForecaster(),
-    initial_window=252,    # 1 year
-    step_size=20,          # Refit every 20 days
-    forecast_horizon=10    # 10-day forecast
-)
+# 95% CI
+lower_95, upper_95 = result.ci(0.95)
+print(f"95% CI at day 30: ({lower_95[-1]:.2f}, {upper_95[-1]:.2f})")
 
-results = validator.run(prices, dates)
+# 90% CI
+lower_90, upper_90 = result.ci(0.90)
+print(f"90% CI at day 30: ({lower_90[-1]:.2f}, {upper_90[-1]:.2f})")
 
-print("Fractal Forecaster Results:")
-print(f"  RMSE: {results['metrics']['rmse']:.4f}")
-print(f"  MAE: {results['metrics']['mae']:.4f}")
-print(f"  Direction Accuracy: {results['metrics']['direction_accuracy']:.2%}")
-print(f"  Coverage: {results['metrics']['coverage']:.2%}")
+# Custom quantiles
+q10 = result.quantile(0.10)
+q90 = result.quantile(0.90)
+print(f"10th-90th percentile: ({q10[-1]:.2f}, {q90[-1]:.2f})")
 ```
 
-## Multi-Model Comparison
+---
+
+## Probability Analysis
 
 ```python
-# Define models to compare
-models = {
-    'Fractal': ft.FractalForecaster(),
-    'ARIMA': ARIMAForecaster(seasonal=False),
-    'ETS': ETSForecaster(trend='add'),
+current = prices[-1]
+final_values = result.paths[:, -1]
+
+# Probability of increase
+prob_up = np.mean(final_values > current)
+print(f"P(increase): {prob_up:.1%}")
+
+# Probability of >5% gain
+prob_5_gain = np.mean(final_values > current * 1.05)
+print(f"P(>5% gain): {prob_5_gain:.1%}")
+
+# Probability of >10% loss
+prob_10_loss = np.mean(final_values < current * 0.90)
+print(f"P(>10% loss): {prob_10_loss:.1%}")
+
+# Value at Risk (5%)
+var_95 = np.percentile(final_values, 5)
+print(f"95% VaR: {var_95:.2f} ({(var_95/current - 1)*100:.1f}%)")
+```
+
+---
+
+## Compare Methods
+
+```python
+# R/S method
+model_rs = ft.Forecaster(prices, method='rs')
+result_rs = model_rs.predict(steps=30, n_paths=1000)
+
+# DFA method
+model_dfa = ft.Forecaster(prices, method='dfa')
+result_dfa = model_dfa.predict(steps=30, n_paths=1000)
+
+# With time warping
+model_tw = ft.Forecaster(prices, time_warp=True)
+result_tw = model_tw.predict(steps=30, n_paths=1000)
+
+# Compare
+print("Method Comparison (30-day forecast):")
+print(f"  R/S:         {result_rs.forecast[-1]:.2f}")
+print(f"  DFA:         {result_dfa.forecast[-1]:.2f}")
+print(f"  Time Warp:   {result_tw.forecast[-1]:.2f}")
+```
+
+---
+
+## Ensemble Forecasting
+
+```python
+# Create ensemble
+ensemble = ft.Ensemble(prices)
+result_ens = ensemble.predict(steps=30, n_paths=500)
+
+print(f"Ensemble forecast: {result_ens.forecast[-1]:.2f}")
+print(f"Number of models: {ensemble.n_models}")
+print(f"Total paths: {result_ens.n_paths}")
+
+# Compare strategies
+strategies = ['average', 'weighted', 'stacking', 'boosting']
+for strategy in strategies:
+    ens = ft.Ensemble(prices, strategy=strategy)
+    res = ens.predict(steps=30, n_paths=300)
+    print(f"{strategy:10}: {res.forecast[-1]:.2f}")
+```
+
+---
+
+## Custom Ensemble
+
+```python
+# Build diverse ensemble
+models = [
+    ft.Forecaster(prices, method='rs'),
+    ft.Forecaster(prices, method='dfa'),
+    ft.Forecaster(prices, time_warp=True),
+    ft.Forecaster(prices, path_weights={
+        'hurst': 0.7,
+        'volatility': 0.2,
+        'pattern': 0.1,
+    }),
+]
+
+ensemble = ft.Ensemble(prices, models=models, strategy='weighted')
+result = ensemble.predict(steps=30, n_paths=500)
+
+print(f"Custom ensemble forecast: {result.forecast[-1]:.2f}")
+if 'model_weights' in result.metadata:
+    print(f"Model weights: {result.metadata['model_weights']}")
+```
+
+---
+
+## With Dates
+
+```python
+import datetime
+
+# Create dates
+dates = [datetime.datetime(2024, 1, 1) + datetime.timedelta(days=i)
+         for i in range(len(prices))]
+
+# Forecaster with dates
+model = ft.Forecaster(prices, dates=dates)
+result = model.predict(steps=30)
+
+# Forecast includes future dates
+print(f"Last historical date: {dates[-1]}")
+print(f"First forecast date: {result.dates[0]}")
+print(f"Last forecast date: {result.dates[-1]}")
+```
+
+---
+
+## Backtest Simulation
+
+```python
+# Split data
+train = prices[:-30]
+test = prices[-30:]
+
+# Fit on training data
+model = ft.Forecaster(train)
+result = model.predict(steps=30)
+
+# Compare to actual
+forecast = result.forecast
+actual = test
+
+# Metrics
+mae = np.mean(np.abs(forecast - actual))
+rmse = np.sqrt(np.mean((forecast - actual)**2))
+mape = np.mean(np.abs((forecast - actual) / actual)) * 100
+
+print(f"MAE:  {mae:.4f}")
+print(f"RMSE: {rmse:.4f}")
+print(f"MAPE: {mape:.2f}%")
+
+# Coverage (what % of actual values fall within CI)
+lower, upper = result.ci(0.95)
+coverage = np.mean((actual >= lower) & (actual <= upper))
+print(f"95% CI Coverage: {coverage:.1%}")
+```
+
+---
+
+## Visualization
+
+```python
+# Plot forecast
+ft.plot(result, title="30-Day Forecast")
+
+# Save to file
+fig = ft.plot(result, show=False)
+fig.write_html("forecast.html")
+```
+
+---
+
+## Export Results
+
+```python
+# To DataFrame
+df = result.to_frame()
+print(df.head())
+
+# Save
+df.write_csv("forecast.csv")
+```
+
+---
+
+## Complete Comparison Script
+
+```python
+import fractime as ft
+import numpy as np
+
+# Data
+np.random.seed(42)
+prices = 100 * np.cumprod(1 + np.random.randn(500) * 0.02)
+
+# Split for testing
+train = prices[:-30]
+test = prices[-30:]
+
+# Models to compare
+configs = {
+    'RS': {'method': 'rs'},
+    'DFA': {'method': 'dfa'},
+    'TimeWarp': {'time_warp': True},
+    'Ensemble': None,  # Special case
 }
 
-# Run comparison
-comparison = compare_models(
-    models=models,
-    prices=prices,
-    dates=dates,
-    initial_window=252,
-    step_size=20,
-    forecast_horizon=10
-)
+results = {}
 
-# Print results
-print("\nModel Comparison:")
-print("-" * 60)
-print(f"{'Model':<15} {'RMSE':>10} {'MAE':>10} {'Direction':>12}")
-print("-" * 60)
-
-for name, metrics in comparison.items():
-    print(f"{name:<15} {metrics['rmse']:>10.4f} {metrics['mae']:>10.4f} {metrics['direction_accuracy']:>11.1%}")
-```
-
-## Statistical Significance
-
-```python
-from fractime.selection import diebold_mariano_test
-
-# Get errors from comparison
-fractal_errors = comparison['Fractal']['errors']
-arima_errors = comparison['ARIMA']['errors']
-
-# Diebold-Mariano test
-dm_stat, p_value = diebold_mariano_test(fractal_errors, arima_errors)
-print(f"\nDiebold-Mariano Test (Fractal vs ARIMA):")
-print(f"  DM Statistic: {dm_stat:.4f}")
-print(f"  P-value: {p_value:.4f}")
-
-if p_value < 0.05:
-    if dm_stat < 0:
-        print("  Result: Fractal significantly outperforms ARIMA")
+for name, config in configs.items():
+    if name == 'Ensemble':
+        model = ft.Ensemble(train)
+        result = model.predict(steps=30, n_paths=500)
     else:
-        print("  Result: ARIMA significantly outperforms Fractal")
-else:
-    print("  Result: No significant difference")
+        model = ft.Forecaster(train, **config)
+        result = model.predict(steps=30, n_paths=1000)
+
+    # Calculate RMSE
+    rmse = np.sqrt(np.mean((result.forecast - test)**2))
+    results[name] = {'forecast': result.forecast[-1], 'rmse': rmse}
+
+# Print comparison
+print("=" * 50)
+print("Model Comparison")
+print("=" * 50)
+print(f"{'Model':<15} {'Forecast':>12} {'RMSE':>12}")
+print("-" * 50)
+for name, metrics in results.items():
+    print(f"{name:<15} {metrics['forecast']:>12.2f} {metrics['rmse']:>12.4f}")
+print("-" * 50)
+print(f"Actual value: {test[-1]:.2f}")
 ```
 
-## Model Confidence Set
+---
 
-```python
-from fractime.selection import model_confidence_set
+## Next Steps
 
-# Build error dict
-model_errors = {
-    name: metrics['errors']
-    for name, metrics in comparison.items()
-}
-
-# Find models that cannot be distinguished
-mcs = model_confidence_set(model_errors, alpha=0.1)
-print(f"\nModel Confidence Set (90% level):")
-print(f"  {mcs}")
-```
-
-## Visualize Results
-
-```python
-import matplotlib.pyplot as plt
-
-# Bar chart of RMSE
-models = list(comparison.keys())
-rmse_values = [comparison[m]['rmse'] for m in models]
-
-plt.figure(figsize=(10, 6))
-plt.bar(models, rmse_values, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
-plt.ylabel('RMSE')
-plt.title('Model Comparison - RMSE')
-plt.show()
-```
+- [Advanced Usage](real-world.md) - Real-world applications
+- [Ensemble Guide](../guide/ensemble.md) - Ensemble methods
+- [API Reference](../api/forecaster.md) - Complete documentation
