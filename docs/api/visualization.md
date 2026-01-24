@@ -1,6 +1,6 @@
 # Visualization API Reference
 
-FracTime provides interactive visualizations using Plotly.
+FracTime provides interactive visualizations using wrchart.
 
 ---
 
@@ -13,6 +13,9 @@ import fractime as ft
 ft.plot(result)
 ft.plot(analyzer)
 ft.plot(analyzer.hurst)
+
+# Plot forecast with Monte Carlo paths
+ft.plot_forecast(prices, result)
 ```
 
 ---
@@ -27,7 +30,7 @@ ft.plot(
     view=None,      # For Metric: 'point', 'rolling', 'distribution'
     title=None,     # Custom title
     show=True,      # Display immediately
-    **kwargs        # Additional Plotly layout args
+    **kwargs        # Additional wrchart arguments
 )
 ```
 
@@ -39,7 +42,9 @@ ft.plot(
 | `view` | str | None | View type for Metric objects |
 | `title` | str | None | Custom plot title |
 | `show` | bool | True | Display immediately |
-| `**kwargs` | - | - | Passed to Plotly layout |
+| `width` | int | varies | Chart width in pixels |
+| `height` | int | varies | Chart height in pixels |
+| `theme` | str | 'dark' | Theme ('dark' or 'light') |
 
 ### Supported Objects
 
@@ -52,7 +57,40 @@ ft.plot(
 
 ### Returns
 
-Plotly `Figure` object.
+wrchart chart object (ForecastChart, MultiPanelChart, or Chart).
+
+---
+
+## plot_forecast()
+
+Plot forecast with Monte Carlo paths and path density visualization.
+
+```python
+ft.plot_forecast(
+    prices,                 # Historical price data
+    result,                 # Forecast result dict
+    dates=None,             # Historical dates (optional)
+    title=None,             # Chart title
+    colorscale='viridis',   # Color scale for path density
+    show_percentiles=True,  # Show percentile lines
+    **kwargs                # Additional arguments
+)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prices` | np.ndarray | required | Historical price data |
+| `result` | dict | required | Forecast result with paths, probabilities |
+| `dates` | np.ndarray | None | Historical dates |
+| `title` | str | None | Chart title |
+| `colorscale` | str | 'viridis' | Color scale ('viridis', 'plasma', 'inferno', 'hot') |
+| `show_percentiles` | bool | True | Show percentile lines |
+
+### Returns
+
+`ForecastChart` object.
 
 ---
 
@@ -69,14 +107,14 @@ ft.plot(result)
 ft.plot(result, title="30-Day Price Forecast")
 
 # Don't show immediately
-fig = ft.plot(result, show=False)
-fig.write_html("forecast.html")
+chart = ft.plot(result, show=False)
+chart.to_html("forecast.html")
 ```
 
 ### What's Shown
 
-- **95% confidence band** (light blue)
-- **50% confidence band** (darker blue)
+- **95% confidence band** (outer band)
+- **50% confidence band** (inner band)
 - **Median forecast** (solid line)
 - **Mean forecast** (dashed line)
 
@@ -99,7 +137,7 @@ ft.plot(analyzer.result)
 - **Hurst gauge** - Value from 0 to 1
 - **Fractal dimension gauge** - Value from 1 to 2
 - **Volatility gauge** - Annualized percentage
-- **Regime pie chart** - Probability distribution
+- **Regime bar chart** - Probability distribution
 
 ---
 
@@ -136,7 +174,7 @@ ft.plot(analyzer.hurst, view='rolling')
 
 Shows:
 - Rolling values over time
-- Horizontal line at current point estimate
+- Line chart with the metric values
 
 ### Distribution View
 
@@ -147,17 +185,16 @@ ft.plot(analyzer.hurst, view='distribution')
 ```
 
 Shows:
-- Bootstrap distribution histogram
-- Vertical line at point estimate
-- 95% CI boundaries
+- Bootstrap distribution as bar chart
+- Point estimate in title
 
 ---
 
 ## Customization
 
-### Plotly Layout Arguments
+### wrchart Arguments
 
-Pass additional arguments to Plotly:
+Pass additional arguments to wrchart:
 
 ```python
 ft.plot(
@@ -165,7 +202,7 @@ ft.plot(
     title="My Forecast",
     height=600,
     width=1000,
-    template='plotly_white',  # Light theme
+    theme='dark',  # or 'light'
 )
 ```
 
@@ -175,43 +212,18 @@ ft.plot(
 |--------|-------------|
 | `height` | Figure height in pixels |
 | `width` | Figure width in pixels |
-| `template` | Plotly theme |
-
-### Available Templates
-
-- `'plotly_dark'` (default)
-- `'plotly_white'`
-- `'plotly'`
-- `'seaborn'`
-- `'ggplot2'`
+| `theme` | Theme ('dark' or 'light') |
+| `colorscale` | For forecasts: 'viridis', 'plasma', 'inferno', 'hot' |
 
 ---
 
-## Saving Figures
+## Saving Charts
 
 ### HTML (Interactive)
 
 ```python
-fig = ft.plot(result, show=False)
-fig.write_html("forecast.html")
-```
-
-### Static Image
-
-Requires kaleido: `pip install kaleido`
-
-```python
-fig = ft.plot(result, show=False)
-fig.write_image("forecast.png", width=1200, height=700)
-fig.write_image("forecast.pdf")
-fig.write_image("forecast.svg")
-```
-
-### JSON (Web Embedding)
-
-```python
-fig = ft.plot(result, show=False)
-json_str = fig.to_json()
+chart = ft.plot(result, show=False)
+chart.to_html("forecast.html")
 ```
 
 ---
@@ -227,6 +239,24 @@ model = ft.Forecaster(prices)
 result = model.predict(steps=30)
 
 ft.plot(result, title="30-Day Forecast")
+```
+
+### Forecast with Monte Carlo Paths
+
+```python
+import fractime as ft
+
+forecaster = ft.FractalForecaster(lookback=252)
+forecaster.fit(prices)
+result = forecaster.predict(n_steps=30, n_paths=500)
+
+chart = ft.plot_forecast(
+    prices[-100:],
+    result,
+    title="Monte Carlo Forecast",
+    colorscale='plasma'
+)
+chart.to_html("forecast.html")
 ```
 
 ### Analysis Dashboard
@@ -250,19 +280,11 @@ analyzer = ft.Analyzer(prices, n_samples=2000)
 ft.plot(analyzer.hurst, view='distribution', title="Hurst Distribution")
 ```
 
-### Save Multiple Formats
+### Save to HTML
 
 ```python
-fig = ft.plot(result, show=False)
-
-# Interactive HTML
-fig.write_html("forecast.html")
-
-# Static PNG
-fig.write_image("forecast.png", width=1200, height=700)
-
-# For reports
-fig.write_image("forecast.pdf")
+chart = ft.plot(result, show=False)
+chart.to_html("forecast.html")
 ```
 
 ### Custom Styling
@@ -273,36 +295,37 @@ ft.plot(
     title="Price Forecast",
     height=500,
     width=900,
-    template='plotly_white',
+    theme='light',
 )
 ```
 
 ---
 
-## Working with Figures
+## Working with Charts
 
-The returned figure is a standard Plotly `Figure` object:
+The returned chart is a wrchart chart object:
 
 ```python
-fig = ft.plot(result, show=False)
+chart = ft.plot(result, show=False)
 
-# Modify traces
-fig.data[0].name = "Custom Name"
+# Display the chart
+chart.show()
 
-# Add annotations
-fig.add_annotation(
-    x=15,
-    y=result.forecast[14],
-    text="Midpoint",
-)
+# Save to HTML
+chart.to_html("forecast.html")
 
-# Update layout
-fig.update_layout(
-    font=dict(size=14),
-)
+# In Streamlit
+chart.streamlit()
+```
 
-# Show modified figure
-fig.show()
+For ForecastChart, you can chain configuration:
+
+```python
+chart = ft.plot_forecast(prices, result, show=False)
+chart.colorscale('plasma')
+chart.show_percentiles(True)
+chart.show_weighted_forecast(True)
+chart.show()
 ```
 
 ---

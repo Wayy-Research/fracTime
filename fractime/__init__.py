@@ -37,7 +37,7 @@ from .ensemble import Ensemble
 from .result import Metric, AnalysisResult, ForecastResult
 
 # Visualization
-from .visualization import plot
+from .visualization import plot, plot_forecast
 
 # Bayesian (optional - requires PyMC)
 try:
@@ -60,6 +60,7 @@ __all__ = [
     'analyze',
     'forecast',
     'plot',
+    'plot_forecast',
 
     # Result types
     'Metric',

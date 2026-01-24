@@ -11,12 +11,11 @@ Examples:
 
 from __future__ import annotations
 
-from typing import Union, Optional, TYPE_CHECKING
+from typing import Union, Optional, Any, TYPE_CHECKING
 import numpy as np
 
 # Lazy imports for optional dependencies
 if TYPE_CHECKING:
-    import plotly.graph_objects as go
     from .result import ForecastResult, AnalysisResult, Metric
     from .analyzer import Analyzer
 
@@ -27,7 +26,7 @@ def plot(
     title: Optional[str] = None,
     show: bool = True,
     **kwargs
-) -> 'go.Figure':
+) -> Any:
     """
     Plot any fractime result.
 
@@ -39,10 +38,10 @@ def plot(
         view: For Metric: 'point', 'rolling', or 'distribution'
         title: Custom plot title
         show: Whether to display the plot immediately
-        **kwargs: Additional arguments passed to Plotly
+        **kwargs: Additional arguments passed to wrchart
 
     Returns:
-        Plotly Figure object
+        wrchart chart object (ForecastChart, MultiPanelChart, or Chart)
 
     Examples:
         Plot forecast:
@@ -58,189 +57,191 @@ def plot(
             >>> ft.plot(analyzer.hurst, view='rolling')
             >>> ft.plot(analyzer.hurst, view='distribution')
     """
-    import plotly.graph_objects as go
-
     # Import result types
     from .result import ForecastResult, AnalysisResult, Metric
     from .analyzer import Analyzer
 
     # Detect type and dispatch
     if isinstance(obj, ForecastResult):
-        fig = _plot_forecast(obj, title, **kwargs)
+        chart = _plot_forecast(obj, title, **kwargs)
     elif isinstance(obj, AnalysisResult):
-        fig = _plot_analysis(obj, title, **kwargs)
+        chart = _plot_analysis(obj, title, **kwargs)
     elif isinstance(obj, Analyzer):
-        fig = _plot_analysis(obj.result, title, **kwargs)
+        chart = _plot_analysis(obj.result, title, **kwargs)
     elif isinstance(obj, Metric):
-        fig = _plot_metric(obj, view, title, **kwargs)
+        chart = _plot_metric(obj, view, title, **kwargs)
     else:
         raise TypeError(f"Cannot plot object of type {type(obj)}")
 
     if show:
-        fig.show()
+        chart.show()
 
-    return fig
+    return chart
 
 
 def _plot_forecast(
     result: 'ForecastResult',
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
+) -> Any:
     """Plot forecast with confidence intervals and path density."""
-    import plotly.graph_objects as go
+    from wrchart import ForecastChart
 
     n_steps = result.n_steps
-    x = list(range(1, n_steps + 1))
 
-    # Use dates if available
-    if result.dates is not None:
-        try:
-            x = result.dates.tolist()
-        except:
-            pass
-
-    fig = go.Figure()
-
-    # Plot confidence bands
-    fig.add_trace(go.Scatter(
-        x=x + x[::-1],
-        y=list(result.upper) + list(result.lower[::-1]),
-        fill='toself',
-        fillcolor='rgba(99, 110, 250, 0.2)',
-        line=dict(color='rgba(255, 255, 255, 0)'),
-        name='95% CI',
-        showlegend=True,
-    ))
-
-    # Plot 50% CI
+    # Build result dict for ForecastChart
+    # Get 25th and 75th percentiles for inner CI
     q25 = result.quantile(0.25)
     q75 = result.quantile(0.75)
-    fig.add_trace(go.Scatter(
-        x=x + x[::-1],
-        y=list(q75) + list(q25[::-1]),
-        fill='toself',
-        fillcolor='rgba(99, 110, 250, 0.4)',
-        line=dict(color='rgba(255, 255, 255, 0)'),
-        name='50% CI',
-        showlegend=True,
-    ))
 
-    # Plot main forecast
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=result.forecast,
-        mode='lines',
-        name='Forecast',
-        line=dict(color='rgb(99, 110, 250)', width=2),
-    ))
+    # Create paths array from percentiles if available
+    # ForecastChart expects paths array, but we can construct one from percentiles
+    # Use forecast, mean, and percentile bounds as representative paths
+    paths = np.vstack([
+        result.forecast,
+        result.mean,
+        result.upper,
+        result.lower,
+        q75,
+        q25,
+    ])
 
-    # Plot mean
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=result.mean,
-        mode='lines',
-        name='Mean',
-        line=dict(color='rgb(239, 85, 59)', width=1, dash='dash'),
-    ))
+    # Create probabilities (weight forecast and mean higher)
+    probabilities = np.array([0.3, 0.3, 0.1, 0.1, 0.1, 0.1])
 
-    # Layout
-    fig.update_layout(
+    result_dict = {
+        'paths': paths,
+        'probabilities': probabilities,
+        'weighted_forecast': result.forecast,
+    }
+
+    # Add dates if available
+    if result.dates is not None:
+        result_dict['dates'] = result.dates
+
+    # Create a dummy historical price (last known value repeated)
+    # Since ForecastResult doesn't include historical, we create a minimal one
+    last_value = result.forecast[0] if len(result.forecast) > 0 else 100.0
+    historical = np.array([last_value])
+
+    # Create ForecastChart
+    width = kwargs.pop('width', 1000)
+    height = kwargs.pop('height', 700)
+    theme = kwargs.pop('theme', 'dark')
+    colorscale = kwargs.pop('colorscale', 'viridis')
+
+    chart = ForecastChart(
+        width=width,
+        height=height,
+        theme=theme,
         title=title or 'Fractal Forecast',
-        xaxis_title='Step' if result.dates is None else 'Date',
-        yaxis_title='Value',
-        template='plotly_dark',
-        hovermode='x unified',
-        **kwargs
     )
 
-    return fig
+    chart.set_data(historical, result_dict)
+    chart.colorscale(colorscale)
+    chart.show_percentiles(True)
+    chart.show_weighted_forecast(True)
+
+    return chart
 
 
 def _plot_analysis(
     result: 'AnalysisResult',
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
-    """Plot analysis dashboard."""
-    from plotly.subplots import make_subplots
-    import plotly.graph_objects as go
+) -> Any:
+    """Plot analysis dashboard using MultiPanelChart with gauges and bars."""
+    from wrchart import MultiPanelChart
+    from wrchart.multipanel import GaugePanel, BarPanel
 
-    # Create subplots
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=(
-            f'Hurst Exponent: {result.hurst.value:.3f}',
-            f'Fractal Dimension: {result.fractal_dim.value:.3f}',
-            f'Volatility: {result.volatility.value:.1%}',
-            f'Regime: {result.regime}'
-        ),
-        specs=[
-            [{'type': 'indicator'}, {'type': 'indicator'}],
-            [{'type': 'indicator'}, {'type': 'pie'}],
-        ]
-    )
+    width = kwargs.pop('width', 1200)
+    height = kwargs.pop('height', 800)
+    theme = kwargs.pop('theme', 'dark')
 
-    # Hurst gauge
-    fig.add_trace(go.Indicator(
-        mode='gauge+number',
-        value=result.hurst.value,
-        domain={'row': 0, 'column': 0},
-        gauge={
-            'axis': {'range': [0, 1]},
-            'bar': {'color': 'rgb(99, 110, 250)'},
-            'steps': [
-                {'range': [0, 0.45], 'color': 'rgba(239, 85, 59, 0.3)'},
-                {'range': [0.45, 0.55], 'color': 'rgba(255, 255, 255, 0.1)'},
-                {'range': [0.55, 1], 'color': 'rgba(0, 204, 150, 0.3)'},
-            ],
-            'threshold': {
-                'line': {'color': 'white', 'width': 2},
-                'thickness': 0.75,
-                'value': 0.5
-            }
-        },
-    ), row=1, col=1)
-
-    # Fractal dimension gauge
-    fig.add_trace(go.Indicator(
-        mode='gauge+number',
-        value=result.fractal_dim.value,
-        domain={'row': 0, 'column': 1},
-        gauge={
-            'axis': {'range': [1, 2]},
-            'bar': {'color': 'rgb(0, 204, 150)'},
-        },
-    ), row=1, col=2)
-
-    # Volatility gauge
-    fig.add_trace(go.Indicator(
-        mode='gauge+number',
-        value=result.volatility.value,
-        number={'suffix': '%', 'valueformat': '.1f'},
-        domain={'row': 1, 'column': 0},
-        gauge={
-            'axis': {'range': [0, 1]},
-            'bar': {'color': 'rgb(239, 85, 59)'},
-        },
-    ), row=2, col=1)
-
-    # Regime pie chart
-    probs = result.regime_probabilities
-    fig.add_trace(go.Pie(
-        labels=list(probs.keys()),
-        values=list(probs.values()),
-        marker={'colors': ['rgb(0, 204, 150)', 'rgb(99, 110, 250)', 'rgb(239, 85, 59)']},
-    ), row=2, col=2)
-
-    fig.update_layout(
+    chart = MultiPanelChart(
+        rows=2,
+        cols=2,
+        width=width,
+        height=height,
         title=title or 'Fractal Analysis',
-        template='plotly_dark',
-        height=600,
-        **kwargs
+        theme=theme,
     )
 
-    return fig
+    # Hurst gauge (row 0, col 0)
+    # Thresholds: < 0.45 mean-reverting (red), 0.45-0.55 random (yellow), > 0.55 trending (green)
+    hurst_thresholds = [
+        (0.45, "#F44336"),   # Red - mean reverting
+        (0.55, "#FFC107"),   # Yellow - random walk
+        (1.0, "#4CAF50"),    # Green - trending
+    ]
+    chart.add_panel(GaugePanel(
+        title=f'Hurst Exponent: {result.hurst.value:.3f}',
+        value=result.hurst.value,
+        min_value=0,
+        max_value=1,
+        thresholds=hurst_thresholds,
+        label='Hurst',
+        row=0,
+        col=0,
+    ))
+
+    # Fractal dimension gauge (row 0, col 1)
+    # Range 1-2, higher = more complex
+    fd_thresholds = [
+        (1.33, "#4CAF50"),   # Green - smooth
+        (1.66, "#FFC107"),   # Yellow - moderate
+        (2.0, "#F44336"),    # Red - complex/rough
+    ]
+    chart.add_panel(GaugePanel(
+        title=f'Fractal Dimension: {result.fractal_dim.value:.3f}',
+        value=result.fractal_dim.value,
+        min_value=1,
+        max_value=2,
+        thresholds=fd_thresholds,
+        label='Fractal Dim',
+        row=0,
+        col=1,
+    ))
+
+    # Volatility gauge (row 1, col 0)
+    vol_pct = result.volatility.value * 100  # Convert to percentage
+    vol_thresholds = [
+        (20, "#4CAF50"),    # Green - low volatility
+        (40, "#FFC107"),    # Yellow - moderate
+        (100, "#F44336"),   # Red - high volatility
+    ]
+    chart.add_panel(GaugePanel(
+        title=f'Volatility: {result.volatility.value:.1%}',
+        value=vol_pct,
+        min_value=0,
+        max_value=100,
+        thresholds=vol_thresholds,
+        label='Volatility',
+        unit='%',
+        row=1,
+        col=0,
+    ))
+
+    # Regime probabilities bar chart (row 1, col 1)
+    # Replace pie chart with horizontal bar chart
+    probs = result.regime_probabilities
+    categories = list(probs.keys())
+    values = [probs[k] * 100 for k in categories]  # Convert to percentages
+
+    # Colors for regime types
+    regime_colors = ['#4CAF50', '#2196F3', '#F44336']  # Green (trending), Blue (random), Red (mean-reverting)
+
+    chart.add_panel(BarPanel(
+        title=f'Regime: {result.regime}',
+        categories=categories,
+        values=values,
+        colors=regime_colors[:len(categories)],
+        show_values=True,
+        row=1,
+        col=1,
+    ))
+
+    return chart
 
 
 def _plot_metric(
@@ -248,10 +249,8 @@ def _plot_metric(
     view: Optional[str] = None,
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
+) -> Any:
     """Plot a single metric."""
-    import plotly.graph_objects as go
-
     if view is None:
         # Auto-detect best view
         try:
@@ -278,117 +277,194 @@ def _plot_metric_point(
     metric: 'Metric',
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
-    """Plot metric as indicator."""
-    import plotly.graph_objects as go
+) -> Any:
+    """Plot metric as gauge indicator."""
+    from wrchart import MultiPanelChart
+    from wrchart.multipanel import GaugePanel
 
-    fig = go.Figure(go.Indicator(
-        mode='gauge+number',
-        value=metric.value,
-        title={'text': metric._name.replace('_', ' ').title()},
-        gauge={
-            'axis': {'range': [0, max(1, metric.value * 1.5)]},
-            'bar': {'color': 'rgb(99, 110, 250)'},
-        },
-    ))
+    width = kwargs.pop('width', 400)
+    height = kwargs.pop('height', 400)
+    theme = kwargs.pop('theme', 'dark')
 
-    fig.update_layout(
-        title=title or f'{metric._name}',
-        template='plotly_dark',
-        **kwargs
+    chart = MultiPanelChart(
+        rows=1,
+        cols=1,
+        width=width,
+        height=height,
+        title=title or metric._name.replace('_', ' ').title(),
+        theme=theme,
     )
 
-    return fig
+    # Determine range based on metric value
+    max_val = max(1, metric.value * 1.5)
+
+    chart.add_panel(GaugePanel(
+        title=metric._name.replace('_', ' ').title(),
+        value=metric.value,
+        min_value=0,
+        max_value=max_val,
+        label=metric._name,
+        row=0,
+        col=0,
+    ))
+
+    return chart
 
 
 def _plot_metric_rolling(
     metric: 'Metric',
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
+) -> Any:
     """Plot metric rolling values."""
-    import plotly.graph_objects as go
+    from wrchart import MultiPanelChart
+    from wrchart.multipanel import LinePanel
+
+    width = kwargs.pop('width', 800)
+    height = kwargs.pop('height', 500)
+    theme = kwargs.pop('theme', 'dark')
 
     rolling = metric.rolling
 
-    # Get x and y
+    # Get x and y data
     if 'date' in rolling.columns:
-        x = rolling['date'].to_list()
+        # Convert dates to numeric indices for plotting
+        x = list(range(len(rolling)))
+        x_label = 'Date'
     else:
         x = rolling['index'].to_list()
+        x_label = 'Index'
+
     y = rolling['value'].to_list()
 
-    fig = go.Figure()
+    chart = MultiPanelChart(
+        rows=1,
+        cols=1,
+        width=width,
+        height=height,
+        title=title or f'{metric._name.replace("_", " ").title()} Over Time',
+        theme=theme,
+    )
 
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=y,
-        mode='lines',
-        name=metric._name,
-        line=dict(color='rgb(99, 110, 250)', width=2),
+    chart.add_panel(LinePanel(
+        title='',
+        x_data=x,
+        y_data=y,
+        colors=['#636EFA'],
+        line_widths=[2],
+        show_zero_line=False,
+        y_label=metric._name.replace('_', ' ').title(),
+        x_label=x_label,
+        row=0,
+        col=0,
     ))
 
-    # Add reference line at current value
-    fig.add_hline(
-        y=metric.value,
-        line_dash='dash',
-        line_color='rgba(239, 85, 59, 0.7)',
-        annotation_text=f'Current: {metric.value:.3f}',
-    )
-
-    fig.update_layout(
-        title=title or f'{metric._name.replace("_", " ").title()} Over Time',
-        xaxis_title='Date' if 'date' in rolling.columns else 'Index',
-        yaxis_title=metric._name.replace('_', ' ').title(),
-        template='plotly_dark',
-        **kwargs
-    )
-
-    return fig
+    return chart
 
 
 def _plot_metric_distribution(
     metric: 'Metric',
     title: Optional[str] = None,
     **kwargs
-) -> 'go.Figure':
+) -> Any:
     """Plot metric bootstrap distribution."""
-    import plotly.graph_objects as go
+    from wrchart import MultiPanelChart
+    from wrchart.multipanel import BarPanel
+
+    width = kwargs.pop('width', 800)
+    height = kwargs.pop('height', 500)
+    theme = kwargs.pop('theme', 'dark')
 
     dist = metric.distribution
 
-    fig = go.Figure()
+    # Create histogram bins
+    n_bins = 30
+    counts, bin_edges = np.histogram(dist, bins=n_bins)
 
-    fig.add_trace(go.Histogram(
-        x=dist,
-        nbinsx=50,
-        name='Distribution',
-        marker_color='rgb(99, 110, 250)',
-        opacity=0.7,
+    # Use bin centers as categories
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    categories = [f'{x:.3f}' for x in bin_centers]
+
+    chart = MultiPanelChart(
+        rows=1,
+        cols=1,
+        width=width,
+        height=height,
+        title=title or f'{metric._name.replace("_", " ").title()} Distribution',
+        theme=theme,
+    )
+
+    chart.add_panel(BarPanel(
+        title=f'Point estimate: {metric.value:.3f}',
+        categories=categories,
+        values=counts.tolist(),
+        colors=['#636EFA'],
+        show_values=False,
+        row=0,
+        col=0,
     ))
 
-    # Add point estimate line
-    fig.add_vline(
-        x=metric.value,
-        line_color='rgb(239, 85, 59)',
-        line_width=2,
-        annotation_text=f'Point: {metric.value:.3f}',
+    return chart
+
+
+def plot_forecast(
+    prices: np.ndarray,
+    result: dict,
+    dates: Optional[np.ndarray] = None,
+    title: Optional[str] = None,
+    colorscale: str = 'viridis',
+    show_percentiles: bool = True,
+    **kwargs
+) -> Any:
+    """
+    Plot forecast with Monte Carlo paths and path density visualization.
+
+    This is the primary forecast visualization function that displays:
+    - Historical price data
+    - Monte Carlo simulation paths with density-based coloring
+    - Percentile lines (5th, 25th, 50th, 75th, 95th)
+    - Weighted forecast line
+
+    Args:
+        prices: Historical price data (numpy array)
+        result: Forecast result dict containing:
+            - paths: (n_paths, n_steps) array of Monte Carlo paths
+            - probabilities: (n_paths,) path probabilities (optional)
+            - weighted_forecast: (n_steps,) weighted forecast (optional)
+        dates: Historical dates (optional)
+        title: Chart title
+        colorscale: Color scale for path density ('viridis', 'plasma', 'inferno', 'hot')
+        show_percentiles: Whether to show percentile lines
+        **kwargs: Additional arguments (width, height, theme)
+
+    Returns:
+        ForecastChart object
+
+    Example:
+        >>> import fractime as ft
+        >>> import numpy as np
+        >>>
+        >>> prices = np.array([100, 101, 102, ...])
+        >>> result = forecaster.predict(n_steps=30, n_paths=500)
+        >>> chart = ft.plot_forecast(prices, result, title="My Forecast")
+        >>> chart.show()
+    """
+    from wrchart import ForecastChart
+
+    width = kwargs.pop('width', 1000)
+    height = kwargs.pop('height', 700)
+    theme = kwargs.pop('theme', 'dark')
+
+    chart = ForecastChart(
+        width=width,
+        height=height,
+        theme=theme,
+        title=title or 'Fractal Forecast',
     )
 
-    # Add CI lines
-    try:
-        ci = metric.ci(0.95)
-        fig.add_vline(x=ci[0], line_dash='dash', line_color='rgba(255, 255, 255, 0.5)')
-        fig.add_vline(x=ci[1], line_dash='dash', line_color='rgba(255, 255, 255, 0.5)')
-    except:
-        pass
+    chart.set_data(prices, result, dates=dates)
+    chart.colorscale(colorscale)
+    chart.show_percentiles(show_percentiles)
+    chart.show_weighted_forecast(True)
 
-    fig.update_layout(
-        title=title or f'{metric._name.replace("_", " ").title()} Distribution',
-        xaxis_title=metric._name.replace('_', ' ').title(),
-        yaxis_title='Count',
-        template='plotly_dark',
-        **kwargs
-    )
-
-    return fig
+    return chart

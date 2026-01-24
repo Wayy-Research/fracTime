@@ -37,7 +37,7 @@ FracTime automatically installs these dependencies:
 | **numpy** | Numerical computing |
 | **polars** | Fast DataFrames |
 | **numba** | JIT compilation for speed |
-| **plotly** | Interactive visualizations |
+| **wrchart** | Interactive visualizations |
 | **scikit-learn** | Clustering and preprocessing |
 
 ### Optional Dependencies

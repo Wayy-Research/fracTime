@@ -384,7 +384,7 @@ def run_comparison_test(
             colorscale='Viridis',
             show_percentiles=True
         )
-        fig_base.write_html("fractal_baseline_forecast.html")
+        fig_base.to_html("fractal_baseline_forecast.html")
         print("   Saved: fractal_baseline_forecast.html")
 
     # Visualization 2: Fractal with exogenous
@@ -398,60 +398,63 @@ def run_comparison_test(
             colorscale='Plasma',
             show_percentiles=True
         )
-        fig_exog.write_html("fractal_exogenous_forecast.html")
+        fig_exog.to_html("fractal_exogenous_forecast.html")
         print("   Saved: fractal_exogenous_forecast.html")
 
     # Visualization 3: Comparison chart
     if fractal_base_result is not None and fractal_exog_result is not None:
         print("\nCreating visualization: Comparison Chart...")
-        import plotly.graph_objects as go
+        from wrchart import MultiPanelChart
+        from wrchart.multipanel import LinePanel
 
-        fig_compare = go.Figure()
+        # Prepare data
+        hist_prices = train_prices[-50:].tolist()
+        hist_x = list(range(len(hist_prices)))
 
-        # Historical
-        fig_compare.add_trace(go.Scatter(
-            x=list(range(len(train_prices[-50:]))),
-            y=train_prices[-50:],
-            mode='lines',
-            name='Historical',
-            line=dict(color='black', width=2)
-        ))
+        test_x = list(range(len(hist_prices), len(hist_prices) + len(test_prices)))
+        actual_prices = test_prices.tolist()
 
-        # Actual test data
-        test_x = list(range(len(train_prices[-50:]), len(train_prices[-50:]) + len(test_prices)))
-        fig_compare.add_trace(go.Scatter(
-            x=test_x,
-            y=test_prices,
-            mode='lines',
-            name='Actual',
-            line=dict(color='green', width=3)
-        ))
+        base_forecast = fractal_base_result['weighted_forecast'][:len(test_prices)].tolist()
+        exog_forecast = fractal_exog_result['weighted_forecast'][:len(test_prices)].tolist()
 
-        # Fractal baseline
-        fig_compare.add_trace(go.Scatter(
-            x=test_x,
-            y=fractal_base_result['weighted_forecast'][:len(test_prices)],
-            mode='lines',
-            name='Fractal (baseline)',
-            line=dict(color='blue', width=2, dash='dash')
-        ))
+        # Combine all data for multi-line plot
+        all_x = hist_x + test_x
+        n_hist = len(hist_prices)
+        n_test = len(test_prices)
 
-        # Fractal with exogenous
-        fig_compare.add_trace(go.Scatter(
-            x=test_x,
-            y=fractal_exog_result['weighted_forecast'][:len(test_prices)],
-            mode='lines',
-            name='Fractal (with exog)',
-            line=dict(color='red', width=2, dash='dash')
-        ))
+        # Historical line (padded with None for forecast region)
+        historical_line = hist_prices + [None] * n_test
 
-        fig_compare.update_layout(
+        # Actual line (padded with None for historical region, starts from last historical)
+        actual_line = [None] * (n_hist - 1) + [hist_prices[-1]] + actual_prices
+
+        # Baseline forecast line
+        baseline_line = [None] * (n_hist - 1) + [hist_prices[-1]] + base_forecast
+
+        # Exogenous forecast line
+        exog_line = [None] * (n_hist - 1) + [hist_prices[-1]] + exog_forecast
+
+        chart = MultiPanelChart(
+            rows=1,
+            cols=1,
+            width=1000,
+            height=600,
             title=f"{target_col} - Model Comparison",
-            xaxis_title="Time",
-            yaxis_title="Price",
-            height=600
+            theme="dark",
         )
-        fig_compare.write_html("model_comparison.html")
+
+        chart.add_panel(LinePanel(
+            title='',
+            x_data=all_x,
+            y_data=[historical_line, actual_line, baseline_line, exog_line],
+            colors=['white', '#4CAF50', '#2196F3', '#F44336'],
+            line_widths=[2, 3, 2, 2],
+            labels=['Historical', 'Actual', 'Fractal (baseline)', 'Fractal (with exog)'],
+            row=0,
+            col=0,
+        ))
+
+        chart.to_html("model_comparison.html")
         print("   Saved: model_comparison.html")
 
     print("\n" + "="*70)

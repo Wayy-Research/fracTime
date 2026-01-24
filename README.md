@@ -57,7 +57,7 @@ pip install -e .
 FracTime uses:
 - **NumPy** and **Polars** for fast data manipulation
 - **Numba** for JIT-compiled performance-critical code
-- **Plotly** for interactive visualizations
+- **wrchart** for interactive visualizations
 - **scikit-learn** for clustering and preprocessing
 
 ---
@@ -579,7 +579,7 @@ result.to_frame()      # Export to Polars DataFrame
 
 ### Visualization
 
-The `plot()` function creates interactive Plotly visualizations for any FracTime object.
+The `plot()` function creates interactive visualizations for any FracTime object.
 
 #### Basic Usage
 
@@ -597,9 +597,9 @@ ft.plot(analyzer)
 # Plot single metric
 ft.plot(analyzer.hurst)
 
-# Don't show immediately (get figure object)
-fig = ft.plot(result, show=False)
-fig.write_html("forecast.html")
+# Don't show immediately (get chart object)
+chart = ft.plot(result, show=False)
+chart.to_html("forecast.html")
 ```
 
 #### Metric Views
@@ -623,9 +623,9 @@ ft.plot(
     result,
     title="My Custom Title",
     show=True,           # Display immediately
-    # Any additional Plotly layout arguments
     height=600,
     width=1000,
+    theme='dark',        # or 'light'
 )
 ```
 

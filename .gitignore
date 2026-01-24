@@ -9,3 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Research outputs
+research_results/
+
+# Generated visualization files
+*.html
+!docs/**/*.html
