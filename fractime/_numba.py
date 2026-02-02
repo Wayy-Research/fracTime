@@ -473,6 +473,293 @@ def generate_paths_from_pattern(
 
 
 # =============================================================================
+# Multifractal Detrended Fluctuation Analysis (MF-DFA)
+# =============================================================================
+
+@njit
+def _compute_segment_variance(
+    y: np.ndarray,
+    start: int,
+    end: int,
+) -> float:
+    """
+    Compute variance of detrended segment using linear fit.
+
+    Args:
+        y: Integrated series
+        start: Segment start index
+        end: Segment end index
+
+    Returns:
+        Variance of detrended segment (F^2)
+    """
+    n = end - start
+    if n < 2:
+        return 0.0
+
+    segment = y[start:end]
+    x = np.arange(n, dtype=np.float64)
+
+    # Linear detrending
+    slope = linear_regression(x, segment)
+    intercept = np.mean(segment) - slope * np.mean(x)
+    trend = slope * x + intercept
+
+    # Compute variance of residuals
+    residuals = segment - trend
+    variance = np.sum(residuals ** 2) / n
+
+    return variance
+
+
+@njit
+def _compute_fluctuation_function(
+    y: np.ndarray,
+    scale: int,
+    q: float,
+) -> float:
+    """
+    Compute fluctuation function F_q(n) for a given scale and moment order.
+
+    Args:
+        y: Integrated series
+        scale: Window size n
+        q: Moment order
+
+    Returns:
+        F_q(n) value
+    """
+    n_segments = len(y) // scale
+    if n_segments < 1:
+        return 0.0
+
+    # Compute variances for all segments (forward and backward)
+    # Using both directions doubles the effective segments
+    total_segments = 2 * n_segments
+    variances = np.zeros(total_segments)
+
+    # Forward segments
+    for i in range(n_segments):
+        start = i * scale
+        end = start + scale
+        variances[i] = _compute_segment_variance(y, start, end)
+
+    # Backward segments (from the end)
+    for i in range(n_segments):
+        start = len(y) - (i + 1) * scale
+        end = start + scale
+        variances[n_segments + i] = _compute_segment_variance(y, start, end)
+
+    # Remove zero variances
+    valid_variances = variances[variances > 0]
+    if len(valid_variances) == 0:
+        return 0.0
+
+    # Compute F_q(n)
+    if abs(q) < 1e-10:
+        # Special case: q = 0 (use geometric mean)
+        # F_0(n) = exp(mean(log(F^2(s,n)))) ^ 0.5
+        return np.exp(0.5 * np.mean(np.log(valid_variances)))
+    else:
+        # General case: F_q(n) = [mean(F^2(s,n)^(q/2))]^(1/q)
+        powered = np.power(valid_variances, q / 2.0)
+        return np.power(np.mean(powered), 1.0 / q)
+
+
+@njit
+def compute_mfdfa(
+    prices: np.ndarray,
+    q_range: np.ndarray,
+    min_scale: int = 10,
+    max_scale: int = 100,
+) -> tuple:
+    """
+    Compute Multifractal DFA.
+
+    MF-DFA generalizes standard DFA by computing fluctuation functions
+    for different statistical moments q. This reveals the full spectrum
+    of scaling exponents that characterize multifractal behavior.
+
+    Args:
+        prices: Price series (must be positive)
+        q_range: Array of q values (moment orders), e.g., np.linspace(-5, 5, 21)
+        min_scale: Minimum window size
+        max_scale: Maximum window size
+
+    Returns:
+        Tuple of (h_q, tau_q) where:
+        - h_q: Generalized Hurst exponents for each q
+        - tau_q: Multifractal scaling exponents (tau(q) = q*h(q) - 1)
+
+    Notes:
+        - h(q=2) should approximate standard DFA Hurst exponent
+        - For monofractal series: h(q) is constant for all q
+        - For multifractal series: h(q) varies with q
+        - Negative q emphasizes small fluctuations
+        - Positive q emphasizes large fluctuations
+    """
+    n = len(prices)
+    if n < max_scale:
+        max_scale = n // 2
+    if max_scale <= min_scale:
+        return np.zeros(len(q_range)), np.zeros(len(q_range))
+
+    # Compute cumulative sum of deviations (integration step)
+    returns = np.diff(np.log(prices))
+    mean_ret = np.mean(returns)
+    y = np.cumsum(returns - mean_ret)
+
+    # Generate log-spaced scales for better regression
+    # Cast to int64 to ensure Numba compatibility
+    scale_range = np.int64(max_scale - min_scale) // 2
+    n_scales = 20 if scale_range > 20 else scale_range
+    if n_scales < 4:
+        n_scales = max_scale - min_scale
+        scales = np.arange(min_scale, max_scale)
+    else:
+        # Logarithmically spaced scales
+        log_scales = np.linspace(np.log(min_scale), np.log(max_scale), n_scales)
+        scales = np.unique(np.floor(np.exp(log_scales)).astype(np.int64))
+
+    n_q = len(q_range)
+    h_q = np.zeros(n_q)
+    tau_q = np.zeros(n_q)
+
+    # For each q, compute fluctuation function at all scales and regress
+    for qi in range(n_q):
+        q = q_range[qi]
+        log_scales_valid = []
+        log_fluct_valid = []
+
+        for scale in scales:
+            if scale < 4:
+                continue
+
+            f_q = _compute_fluctuation_function(y, int(scale), q)
+            if f_q > 0:
+                log_scales_valid.append(np.log(scale))
+                log_fluct_valid.append(np.log(f_q))
+
+        # Regress log(F_q) vs log(n) to get h(q)
+        if len(log_scales_valid) >= 2:
+            log_scales_arr = np.array(log_scales_valid)
+            log_fluct_arr = np.array(log_fluct_valid)
+            h_q[qi] = linear_regression(log_scales_arr, log_fluct_arr)
+        else:
+            h_q[qi] = 0.5  # Fallback
+
+        # tau(q) = q * h(q) - 1
+        tau_q[qi] = q * h_q[qi] - 1.0
+
+    return h_q, tau_q
+
+
+@njit
+def compute_multifractal_spectrum(
+    h_q: np.ndarray,
+    q_range: np.ndarray,
+) -> tuple:
+    """
+    Compute singularity spectrum f(alpha) from generalized Hurst exponents.
+
+    The singularity spectrum is the multifractal analog of a histogram,
+    showing the distribution of singularity strengths (alpha) and their
+    fractal dimensions f(alpha).
+
+    Args:
+        h_q: Generalized Hurst exponents from MF-DFA
+        q_range: Array of q values used in MF-DFA
+
+    Returns:
+        Tuple of (alpha, f_alpha) for the multifractal spectrum where:
+        - alpha: Singularity strength (Holder exponent)
+        - f_alpha: Fractal dimension of subset with singularity alpha
+
+    Notes:
+        - Spectrum width (max(alpha) - min(alpha)) measures multifractality
+        - Symmetric spectrum indicates similar small/large fluctuation scaling
+        - Asymmetric spectrum indicates different scaling for different fluctuations
+    """
+    n_q = len(q_range)
+    alpha = np.zeros(n_q)
+    f_alpha = np.zeros(n_q)
+
+    # Compute dh/dq using central differences
+    dh_dq = np.zeros(n_q)
+
+    for i in range(n_q):
+        if i == 0:
+            # Forward difference at start
+            dh_dq[i] = (h_q[1] - h_q[0]) / (q_range[1] - q_range[0])
+        elif i == n_q - 1:
+            # Backward difference at end
+            dh_dq[i] = (h_q[n_q-1] - h_q[n_q-2]) / (q_range[n_q-1] - q_range[n_q-2])
+        else:
+            # Central difference
+            dh_dq[i] = (h_q[i+1] - h_q[i-1]) / (q_range[i+1] - q_range[i-1])
+
+    # alpha(q) = h(q) + q * dh/dq
+    for i in range(n_q):
+        alpha[i] = h_q[i] + q_range[i] * dh_dq[i]
+
+    # f(alpha) = q * alpha - tau(q)
+    for i in range(n_q):
+        tau_q = q_range[i] * h_q[i] - 1.0
+        f_alpha[i] = q_range[i] * alpha[i] - tau_q
+
+    return alpha, f_alpha
+
+
+@njit
+def bootstrap_mfdfa(
+    prices: np.ndarray,
+    q_range: np.ndarray,
+    n_samples: int,
+    min_scale: int,
+    max_scale: int,
+    block_size: int,
+) -> np.ndarray:
+    """
+    Bootstrap spectrum width from MF-DFA using block bootstrap.
+
+    Args:
+        prices: Price series
+        q_range: Array of q values
+        n_samples: Number of bootstrap samples
+        min_scale: Minimum scale for MF-DFA
+        max_scale: Maximum scale for MF-DFA
+        block_size: Size of blocks for block bootstrap
+
+    Returns:
+        Array of bootstrapped spectrum width values
+    """
+    n = len(prices)
+    results = np.empty(n_samples)
+
+    for s in range(n_samples):
+        # Block bootstrap
+        boot_prices = np.empty(n)
+        idx = 0
+
+        while idx < n:
+            block_start = np.random.randint(0, n - block_size + 1)
+            block_end = min(block_start + block_size, n)
+            copy_len = min(block_end - block_start, n - idx)
+
+            boot_prices[idx:idx + copy_len] = prices[block_start:block_start + copy_len]
+            idx += copy_len
+
+        # Compute MF-DFA
+        h_q, _ = compute_mfdfa(boot_prices[:n], q_range, min_scale, max_scale)
+        alpha, _ = compute_multifractal_spectrum(h_q, q_range)
+
+        # Spectrum width
+        results[s] = np.max(alpha) - np.min(alpha)
+
+    return results
+
+
+# =============================================================================
 # Bootstrap
 # =============================================================================
 

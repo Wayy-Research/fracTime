@@ -32,6 +32,7 @@ from .prophet import ProphetForecaster
 from .ets import ETSForecaster
 from .var import VARForecaster
 from .lstm import LSTMForecaster
+from .fractal_lstm import FractalLSTMForecaster
 
 __all__ = [
     'ARIMAForecaster',
@@ -40,4 +41,5 @@ __all__ = [
     'ETSForecaster',
     'VARForecaster',
     'LSTMForecaster',
+    'FractalLSTMForecaster',
 ]

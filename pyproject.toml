@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fractime"
-version = "0.4.0"
+version = "0.5.0"
 description = "Python library for advanced time series forecasting using fractal geometry and chaos theory"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -46,6 +46,7 @@ dependencies = [
     "pytensor>=2.18.0",
     # ML
     "xgboost>=2.0.0",
+    "hmmlearn>=0.3.0",  # HMM-based regime detection
     # Visualization
     "wrchart>=0.1.0",
 ]

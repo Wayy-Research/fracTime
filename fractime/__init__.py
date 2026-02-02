@@ -17,6 +17,16 @@ Simple, composable API:
     >>> result.forecast                   # Primary forecast
     >>> result.ci(0.95)                   # Confidence interval
 
+    # Regime Detection (NEW in v0.5)
+    >>> detector = ft.RegimeDetector(n_regimes=2)
+    >>> detector.fit(returns)
+    >>> regime, prob = detector.get_current_regime(returns)
+
+    # Regime-Based Strategy (NEW in v0.5)
+    >>> strategy = ft.RegimeStrategy(bull_allocation=1.0, bear_allocation=0.3)
+    >>> results = strategy.backtest(prices)
+    >>> print(f"Sharpe: {results.sharpe:.2f}")
+
     # Plot
     >>> ft.plot(result)
 
@@ -25,6 +35,8 @@ All components are composable:
     - Simulator: Generate Monte Carlo paths
     - Forecaster: Probabilistic forecasting
     - Ensemble: Combine multiple models
+    - RegimeDetector: HMM-based market regime detection
+    - RegimeStrategy: Regime-based position sizing
 """
 
 # Core classes
@@ -39,6 +51,10 @@ from .result import Metric, AnalysisResult, ForecastResult
 # Visualization
 from .visualization import plot, plot_forecast
 
+# Regime detection and strategy (NEW in v0.5)
+from .regime import RegimeDetector
+from .strategy import RegimeStrategy, BacktestResult, quick_backtest
+
 # Bayesian (optional - requires PyMC)
 try:
     from .bayesian import BayesianFractalForecaster as BayesianForecaster
@@ -47,7 +63,7 @@ except (ImportError, ModuleNotFoundError, NameError, Exception):
     _BAYESIAN_AVAILABLE = False
     BayesianForecaster = None
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     # Core classes
@@ -55,6 +71,12 @@ __all__ = [
     'Forecaster',
     'Simulator',
     'Ensemble',
+
+    # Regime detection and strategy (NEW in v0.5)
+    'RegimeDetector',
+    'RegimeStrategy',
+    'BacktestResult',
+    'quick_backtest',
 
     # Convenience functions
     'analyze',
