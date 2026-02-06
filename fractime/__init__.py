@@ -63,7 +63,7 @@ except (ImportError, ModuleNotFoundError, NameError, Exception):
     _BAYESIAN_AVAILABLE = False
     BayesianForecaster = None
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 __all__ = [
     # Core classes
