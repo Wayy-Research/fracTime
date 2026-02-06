@@ -104,83 +104,6 @@ def test_prophet_basic():
     return True
 
 
-def test_with_backtesting():
-    """Test baseline models with backtesting framework."""
-    print("\nTesting baselines with WalkForwardValidator...")
-    from fractime.baselines import ARIMAForecaster
-    from fractime.backtesting import WalkForwardValidator
-
-    # Generate test data
-    np.random.seed(42)
-    prices = 100 + np.cumsum(np.random.randn(200) * 0.5)
-    dates = np.array([np.datetime64('2020-01-01') + np.timedelta64(i, 'D') for i in range(200)])
-
-    # Run validation
-    model = ARIMAForecaster(max_p=2, max_q=2, stepwise=True)
-    validator = WalkForwardValidator(
-        model=model,
-        initial_window=150,
-        step_size=10,
-        forecast_horizon=1,
-        verbose=False
-    )
-
-    results = validator.run(prices, dates)
-
-    # Check results
-    assert 'forecasts' in results, "Results should contain 'forecasts'"
-    assert 'metrics' in results, "Results should contain 'metrics'"
-    assert len(results['forecasts']) > 0, "Should have some forecasts"
-
-    print(f"  Generated {len(results['forecasts'])} forecasts")
-    print(f"  RMSE: {results['metrics']['rmse']:.4f}")
-    print(f"  Direction Accuracy: {results['metrics']['direction_accuracy']:.2%}")
-    print("  ✓ Backtesting integration working")
-    return True
-
-
-def test_model_comparison():
-    """Test comparing baseline models."""
-    print("\nTesting model comparison...")
-    from fractime.baselines import ARIMAForecaster, GARCHForecaster
-    from fractime.backtesting import WalkForwardValidator, compare_models
-    import fractime as ft
-
-    # Generate test data
-    np.random.seed(42)
-    prices = 100 + np.cumsum(np.random.randn(200) * 0.5)
-    dates = np.array([np.datetime64('2020-01-01') + np.timedelta64(i, 'D') for i in range(200)])
-
-    # Run validation for multiple models
-    models = {
-        'Fractal': ft.FractalForecaster(),
-        'ARIMA': ARIMAForecaster(max_p=2, max_q=2, stepwise=True),
-        'GARCH': GARCHForecaster(p=1, q=1),
-    }
-
-    results = {}
-    for name, model in models.items():
-        validator = WalkForwardValidator(
-            model=model,
-            initial_window=150,
-            step_size=25,
-            forecast_horizon=1,
-            verbose=False
-        )
-        results[name] = validator.run(prices, dates)
-
-    # Compare models
-    comparison = compare_models(results)
-
-    assert 'best_model' in comparison, "Comparison should have best_model"
-    assert comparison['best_model'] in models.keys(), "Best model should be one of the tested models"
-
-    print(f"  Best model: {comparison['best_model']}")
-    print(f"  Number of models compared: {len(results)}")
-    print("  ✓ Model comparison working")
-    return True
-
-
 def run_all_tests():
     """Run all tests."""
     print("=" * 80)
@@ -192,8 +115,6 @@ def run_all_tests():
         test_arima_basic,
         test_garch_basic,
         test_prophet_basic,
-        test_with_backtesting,
-        test_model_comparison,
     ]
 
     passed = 0

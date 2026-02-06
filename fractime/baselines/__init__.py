@@ -32,7 +32,17 @@ from .prophet import ProphetForecaster
 from .ets import ETSForecaster
 from .var import VARForecaster
 from .lstm import LSTMForecaster
-from .fractal_lstm import FractalLSTMForecaster
+
+# PyTorch-dependent models (optional)
+try:
+    from .fractal_lstm import FractalLSTMForecaster
+except ImportError:
+    FractalLSTMForecaster = None  # PyTorch not installed
+
+try:
+    from .cloud_conditioned_lstm import CloudConditionedLSTMForecaster
+except ImportError:
+    CloudConditionedLSTMForecaster = None  # PyTorch not installed
 
 __all__ = [
     'ARIMAForecaster',
@@ -42,4 +52,5 @@ __all__ = [
     'VARForecaster',
     'LSTMForecaster',
     'FractalLSTMForecaster',
+    'CloudConditionedLSTMForecaster',
 ]

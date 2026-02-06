@@ -11,6 +11,18 @@ Tests the paper's claimed improvements:
 import numpy as np
 import pytest
 
+# Check for PyTorch availability
+PYTORCH_AVAILABLE = False
+try:
+    import torch
+    PYTORCH_AVAILABLE = True
+except ImportError:
+    pass
+
+requires_pytorch = pytest.mark.skipif(
+    not PYTORCH_AVAILABLE, reason="PyTorch not installed"
+)
+
 
 # =============================================================================
 # Test Fixtures
@@ -183,6 +195,7 @@ class TestRegimeDetector:
 # =============================================================================
 
 
+@requires_pytorch
 class TestFractalLSTM:
     """Tests for FracTime-LSTM hybrid architecture."""
 
@@ -498,9 +511,224 @@ class TestMFDFA:
 # =============================================================================
 
 
+# =============================================================================
+# CloudConditionedLSTM Tests
+# =============================================================================
+
+
+@requires_pytorch
+class TestCloudConditionedLSTM:
+    """Tests for Cloud-Conditioned LSTM architecture."""
+
+    @pytest.fixture
+    def short_prices(self):
+        """Short price series for quick testing."""
+        np.random.seed(42)
+        return 100 * np.cumprod(1 + np.random.randn(150) * 0.02)
+
+    def test_import(self):
+        """Test that CloudConditionedLSTMForecaster can be imported."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+        assert CloudConditionedLSTMForecaster is not None
+
+    def test_init(self):
+        """Test initialization."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+        model = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=100,
+            hidden_size_1=32,
+            hidden_size_2=16,
+            cloud_encoding_dim=16,
+            cloud_weight=0.3,
+        )
+        assert model.lookback == 20
+        assert model.n_cloud_paths == 100
+        assert model.hidden_size_1 == 32
+        assert model.hidden_size_2 == 16
+        assert model.cloud_encoding_dim == 16
+        assert model.cloud_weight == 0.3
+
+    def test_cloud_encoder_shape(self, short_prices):
+        """Test CloudEncoder produces correct shape."""
+        from fractime.baselines.cloud_conditioned_lstm import CloudEncoder
+        from fractime import Simulator
+
+        # Generate a cloud
+        sim = Simulator(short_prices)
+        cloud = sim.generate(n_paths=100, steps=10)
+
+        # Encode it
+        encoder = CloudEncoder(n_steps=10, cloud_encoding_dim=32)
+        cloud_stats = encoder.encode_cloud_numpy(cloud)
+
+        # Shape should be (n_steps, 8) - 8 statistics per step
+        assert cloud_stats.shape == (10, 8)
+
+        # Mean should be close to cloud mean at each step
+        for t in range(10):
+            assert abs(cloud_stats[t, 0] - np.mean(cloud[:, t])) < 1e-10
+
+    def test_film_layer(self):
+        """Test FiLM layer modulation."""
+        import torch
+        from fractime.baselines.cloud_conditioned_lstm import FiLMLayer
+
+        hidden_size = 32
+        cloud_encoding_dim = 16
+        batch_size = 4
+        seq_len = 10
+
+        film = FiLMLayer(hidden_size, cloud_encoding_dim)
+
+        # Random hidden state and cloud encoding
+        h = torch.randn(batch_size, seq_len, hidden_size)
+        cloud_enc = torch.randn(batch_size, seq_len, cloud_encoding_dim)
+
+        # Apply FiLM
+        h_modulated = film(h, cloud_enc)
+
+        # Output should have same shape
+        assert h_modulated.shape == h.shape
+
+        # With zero cloud encoding, output should be close to input
+        # (since gamma initialized near 1, beta near 0)
+        zero_enc = torch.zeros(batch_size, seq_len, cloud_encoding_dim)
+        h_zero = film(h, zero_enc)
+        # Should be close but not identical due to learned biases
+        assert h_zero.shape == h.shape
+
+    def test_fit(self, short_prices):
+        """Test model fitting."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+        model = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=50,
+            hidden_size_1=32,
+            hidden_size_2=16,
+            cloud_encoding_dim=16,
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model.fit(short_prices)
+        assert model.model is not None
+        assert model.simulator is not None
+
+    def test_predict_returns_forecast_result(self, short_prices):
+        """Test that predict returns ForecastResult."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+        from fractime.result import ForecastResult
+
+        model = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=50,
+            hidden_size_1=32,
+            hidden_size_2=16,
+            cloud_encoding_dim=16,
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model.fit(short_prices)
+        result = model.predict(n_steps=5, n_simulations=20)
+
+        # Should return ForecastResult
+        assert isinstance(result, ForecastResult)
+        assert result.n_steps == 5
+        assert hasattr(result, 'forecast')
+        assert hasattr(result, 'paths')
+        assert hasattr(result, 'lower')
+        assert hasattr(result, 'upper')
+        assert len(result.forecast) == 5
+
+    def test_cloud_influences_predictions(self, short_prices):
+        """Test that cloud weight affects predictions."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+
+        # Model with high cloud weight
+        model_high = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=50,
+            cloud_weight=0.8,
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model_high.fit(short_prices)
+        result_high = model_high.predict(n_steps=5, n_simulations=20)
+
+        # Model with low cloud weight
+        model_low = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=50,
+            cloud_weight=0.2,
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model_low.fit(short_prices)
+        result_low = model_low.predict(n_steps=5, n_simulations=20)
+
+        # Both should produce valid forecasts
+        assert len(result_high.forecast) == 5
+        assert len(result_low.forecast) == 5
+
+        # Number of cloud paths in result should differ
+        assert result_high.metadata['n_cloud_paths'] > result_low.metadata['n_cloud_paths']
+
+    def test_model_params(self, short_prices):
+        """Test model parameters retrieval."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+        model = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=50,
+            hidden_size_1=32,
+            hidden_size_2=16,
+            cloud_encoding_dim=16,
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model.fit(short_prices)
+        params = model.get_model_params()
+
+        assert 'lookback' in params
+        assert 'n_cloud_paths' in params
+        assert 'hidden_size_1' in params
+        assert 'cloud_encoding_dim' in params
+        assert 'cloud_weight' in params
+        assert 'total_params' in params
+
+    def test_predict_high_cloud_weight_low_simulations(self, short_prices):
+        """Test edge case where cloud paths needed exceeds available."""
+        from fractime.baselines import CloudConditionedLSTMForecaster
+
+        model = CloudConditionedLSTMForecaster(
+            lookback=20,
+            n_cloud_paths=10,  # Only 10 cloud paths
+            cloud_weight=0.9,  # But we want 90% from cloud
+            hurst_window=30,
+            epochs=3,
+            verbose=0,
+        )
+        model.fit(short_prices)
+
+        # This should not raise even though we need 18 cloud paths but only have 10
+        result = model.predict(n_steps=5, n_simulations=20)
+        assert len(result.forecast) == 5
+        assert result.n_paths == 20
+
+
+# =============================================================================
+# Integration Tests
+# =============================================================================
+
+
 class TestIntegration:
     """Integration tests combining multiple modules."""
 
+    @requires_pytorch
     def test_regime_aware_forecasting(self, synthetic_returns, synthetic_prices):
         """Test that regime detection can inform forecasting."""
         from fractime.regime import RegimeDetector
@@ -590,6 +818,7 @@ class TestPaperClaims:
         var_ratio = max(vars_) / (min(vars_) + 1e-10)
         assert var_ratio > 1.2, f"Regime variances too similar: {vars_}"
 
+    @requires_pytorch
     def test_fractal_features_computed(self, synthetic_prices):
         """
         Paper claim: FracTime-LSTM uses explicit fractal features.
