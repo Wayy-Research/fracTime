@@ -185,6 +185,9 @@ class Analyzer:
 
     def _compute_hurst_point(self) -> float:
         """Compute point estimate of Hurst exponent."""
+        if self._method == 'wavelet':
+            from .advanced import compute_wavelet_hurst
+            return compute_wavelet_hurst(self._data)
         if self._method == 'dfa':
             return compute_hurst_dfa(self._data, self._min_scale, self._max_scale)
         return compute_hurst_rs(self._data, self._min_scale, self._max_scale)
@@ -197,7 +200,10 @@ class Analyzer:
 
         for i in range(self._window, n):
             segment = self._data[i - self._window:i]
-            if self._method == 'dfa':
+            if self._method == 'wavelet':
+                from .advanced import compute_wavelet_hurst
+                h = compute_wavelet_hurst(segment)
+            elif self._method == 'dfa':
                 h = compute_hurst_dfa(segment, self._min_scale, min(self._max_scale, self._window // 2))
             else:
                 h = compute_hurst_rs(segment, self._min_scale, min(self._max_scale, self._window // 2))

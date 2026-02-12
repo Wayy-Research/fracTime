@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\caption{Forecast Accuracy by Model and Horizon}
+\label{tab:main_results}
+\begin{tabular}{lccccccccccccccc}
+\toprule
+Model & \multicolumn{3}{c}{1D} & \multicolumn{3}{c}{5D} & \multicolumn{3}{c}{21D} & \multicolumn{3}{c}{63D} & \multicolumn{3}{c}{OVERALL} \\
+\cmidrule(lr){2-4}\cmidrule(lr){2-4}\cmidrule(lr){2-4}\cmidrule(lr){2-4}\cmidrule(lr){2-4}
+ & RMSE & MAE & Dir. & RMSE & MAE & Dir. & RMSE & MAE & Dir. & RMSE & MAE & Dir. & RMSE & MAE & Dir. \\
+\midrule
+fractime\_rs & 445.7911 & 169.9325 & 53\% & 1258.3044 & 421.8060 & \textbf{58\%} & 2675.5557 & 1067.4640 & \textbf{61\%} & -- & -- & -- & 1726.3312 & 553.0675 & 58\% \\
+fractime\_dfa & 462.7908 & 176.0376 & 45\% & 1220.7073 & 418.2678 & 58\% & 2728.0892 & 1073.5954 & 58\% & -- & -- & -- & 1746.1169 & 555.9670 & 54\% \\
+fractime\_ensemble & 445.8871 & 171.9665 & 48\% & 1244.1708 & 427.0839 & 55\% & 2687.5042 & 1072.7124 & 59\% & -- & -- & -- & 1729.1091 & 557.2543 & 54\% \\
+arima & 471.7552 & 171.3872 & 36\% & 1345.4112 & 431.9073 & 40\% & \textbf{2340.8912} & \textbf{913.3384} & 43\% & -- & -- & -- & 1582.4513 & 505.5443 & 40\% \\
+garch & \textbf{421.6591} & 161.2404 & \textbf{63\%} & 1262.7573 & 434.3081 & 58\% & 2818.3884 & 1116.0883 & 61\% & -- & -- & -- & 1799.5986 & 570.5456 & \textbf{60\%} \\
+ets & 430.9489 & \textbf{161.0128} & 54\% & \textbf{1149.6823} & \textbf{397.9714} & 55\% & 2358.7839 & 914.7758 & 52\% & -- & -- & -- & \textbf{1535.2902} & \textbf{491.2533} & 54\% \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Best values in each column are in bold. Dir. = Directional Accuracy.
+\end{tablenotes}
+\end{table}

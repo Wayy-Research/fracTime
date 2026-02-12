@@ -1,0 +1,21 @@
+\begin{table}[htbp]
+\centering
+\caption{Diebold-Mariano Tests (FracTime R/S as Baseline)}
+\label{tab:dm_tests}
+\begin{tabular}{lccc}
+\toprule
+Model & DM Statistic & p-value & Conclusion \\
+\midrule
+fractime\_dfa & -0.675 & 0.4999 & FracTime better \\
+fractime\_ensemble & -0.097 & 0.9231 & FracTime better \\
+arima & 1.120 & 0.2627 & arima better \\
+garch & -2.072 & 0.0383** & FracTime better \\
+ets & 1.546 & 0.1221 & ets better \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item *p<0.10, **p<0.05, ***p<0.01
+\item Negative statistic indicates FracTime R/S has lower loss.
+\end{tablenotes}
+\end{table}

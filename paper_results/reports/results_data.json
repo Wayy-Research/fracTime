@@ -1,0 +1,551 @@
+{
+  "config": {
+    "name": "paper_experiments",
+    "description": "FracTime paper: walk-forward model comparison",
+    "assets": [
+      {
+        "ticker": "^GSPC",
+        "name": "S&P 500",
+        "category": "index",
+        "subcategory": "broad",
+        "frequency": "daily",
+        "start_date": "2015-01-01",
+        "end_date": "2024-12-31"
+      },
+      {
+        "ticker": "AAPL",
+        "name": "Apple Inc.",
+        "category": "equity",
+        "subcategory": "tech",
+        "frequency": "daily",
+        "start_date": "2015-01-01",
+        "end_date": "2024-12-31"
+      },
+      {
+        "ticker": "BTC-USD",
+        "name": "Bitcoin",
+        "category": "crypto",
+        "subcategory": "major",
+        "frequency": "daily",
+        "start_date": "2017-01-01",
+        "end_date": "2024-12-31"
+      },
+      {
+        "ticker": "ETH-USD",
+        "name": "Ethereum",
+        "category": "crypto",
+        "subcategory": "major",
+        "frequency": "daily",
+        "start_date": "2017-06-01",
+        "end_date": "2024-12-31"
+      }
+    ],
+    "horizons": {
+      "1d": 1,
+      "5d": 5,
+      "21d": 21
+    },
+    "models": [
+      "fractime_rs",
+      "fractime_dfa",
+      "fractime_ensemble",
+      "arima",
+      "garch",
+      "ets"
+    ],
+    "train_window": 252,
+    "step_size": 63,
+    "window_type": "expanding",
+    "rolling_window_size": null,
+    "n_paths": 500,
+    "confidence_levels": [
+      0.5,
+      0.8,
+      0.95
+    ],
+    "output_dir": "paper_results",
+    "random_seed": 42,
+    "timestamp": "2026-02-11T15:22:39.960484"
+  },
+  "metrics": {
+    "fractime_rs": {
+      "1d": {
+        "rmse": 445.79108403208284,
+        "mae": 169.93252261623252,
+        "mape": 1.9120262188287762,
+        "mdape": 1.1941751941160366,
+        "crps": 314.2123112735014,
+        "direction_accuracy": 0.5294117647058824,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9738562091503268,
+        "calibration_error": 0.023856209150326824,
+        "mean_interval_width": 1514.3194800584138,
+        "sharpe_ratio": 1.1314774097430715,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.0973464052287582,
+          "pit_p_value": 0.10293275663754364
+        }
+      },
+      "5d": {
+        "rmse": 1258.3043787398324,
+        "mae": 421.80602996348154,
+        "mape": 5.0079971618076256,
+        "mdape": 2.5349809611730603,
+        "crps": 795.863946573024,
+        "direction_accuracy": 0.5816993464052288,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9411764705882353,
+        "calibration_error": 0.008823529411764675,
+        "mean_interval_width": 3421.9866488319817,
+        "sharpe_ratio": -0.5159304222504648,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.10392156862745097,
+          "pit_p_value": 0.06827561733334042
+        }
+      },
+      "21d": {
+        "rmse": 2675.5556861316204,
+        "mae": 1067.46396687517,
+        "mape": 11.111330337841716,
+        "mdape": 7.134969862601939,
+        "crps": 1821.6531188817976,
+        "direction_accuracy": 0.6143790849673203,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.954248366013072,
+        "calibration_error": 0.004248366013071991,
+        "mean_interval_width": 7662.499045415951,
+        "sharpe_ratio": 4.229284320372876,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.06427450980392158,
+          "pit_p_value": 0.5310043839352834
+        }
+      },
+      "overall": {
+        "rmse": 1726.3311607519554,
+        "mae": 553.0675064849614,
+        "mape": 6.010451239492706,
+        "mdape": 2.5689715259904844,
+        "crps": 710.6750444483993,
+        "direction_accuracy": 0.5751633986928104,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9564270152505446,
+        "calibration_error": 0.0064270152505446765,
+        "mean_interval_width": 4199.601724768782,
+        "sharpe_ratio": 2.1566947719615674,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    },
+    "fractime_dfa": {
+      "1d": {
+        "rmse": 462.7907504122008,
+        "mae": 176.03760641813986,
+        "mape": 1.9028053612284017,
+        "mdape": 1.2379845431758238,
+        "crps": 320.1561731394165,
+        "direction_accuracy": 0.45098039215686275,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9607843137254902,
+        "calibration_error": 0.010784313725490269,
+        "mean_interval_width": 1551.9296529926733,
+        "sharpe_ratio": -0.6860483159152656,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.09945098039215683,
+          "pit_p_value": 0.09052284715657122
+        }
+      },
+      "5d": {
+        "rmse": 1220.7072883924716,
+        "mae": 418.26782745817223,
+        "mape": 4.9967916643293036,
+        "mdape": 2.523026469212204,
+        "crps": 788.7677476204819,
+        "direction_accuracy": 0.5816993464052288,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.954248366013072,
+        "calibration_error": 0.004248366013071991,
+        "mean_interval_width": 3433.5313714782897,
+        "sharpe_ratio": 0.5353949181825761,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.09938562091503267,
+          "pit_p_value": 0.09088851283359645
+        }
+      },
+      "21d": {
+        "rmse": 2728.089206797851,
+        "mae": 1073.5954245520666,
+        "mape": 11.133490545906099,
+        "mdape": 7.47166330451586,
+        "crps": 1815.1293029384124,
+        "direction_accuracy": 0.5751633986928104,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.954248366013072,
+        "calibration_error": 0.004248366013071991,
+        "mean_interval_width": 7508.302960362599,
+        "sharpe_ratio": 2.9769620991017236,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.07006535947712417,
+          "pit_p_value": 0.4211614330603535
+        }
+      },
+      "overall": {
+        "rmse": 1746.1168615768072,
+        "mae": 555.9669528094596,
+        "mape": 6.0110291904879345,
+        "mdape": 2.5915571689311445,
+        "crps": 718.282232971707,
+        "direction_accuracy": 0.5359477124183006,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9564270152505446,
+        "calibration_error": 0.0064270152505446765,
+        "mean_interval_width": 4164.587994944521,
+        "sharpe_ratio": 1.5998922905671413,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    },
+    "fractime_ensemble": {
+      "1d": {
+        "rmse": 445.88712477139785,
+        "mae": 171.96654928823023,
+        "mape": 1.904994560219617,
+        "mdape": 1.1739861399754783,
+        "crps": 314.30936592614273,
+        "direction_accuracy": 0.477124183006536,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9673202614379085,
+        "calibration_error": 0.017320261437908546,
+        "mean_interval_width": 1505.9215846427885,
+        "sharpe_ratio": 1.1650320510203207,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.10946405228758166,
+          "pit_p_value": 0.04730571191944577
+        }
+      },
+      "5d": {
+        "rmse": 1244.1708253770626,
+        "mae": 427.0839005923585,
+        "mape": 5.043391678035834,
+        "mdape": 2.416788108328217,
+        "crps": 796.9449875438437,
+        "direction_accuracy": 0.5490196078431373,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.954248366013072,
+        "calibration_error": 0.004248366013071991,
+        "mean_interval_width": 3438.7834447766486,
+        "sharpe_ratio": -0.7869731667686288,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.10164705882352942,
+          "pit_p_value": 0.07893339316922976
+        }
+      },
+      "21d": {
+        "rmse": 2687.5041521434628,
+        "mae": 1072.712395869811,
+        "mape": 11.153687714477293,
+        "mdape": 7.623137018916815,
+        "crps": 1833.1596639768402,
+        "direction_accuracy": 0.5947712418300654,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.954248366013072,
+        "calibration_error": 0.004248366013071991,
+        "mean_interval_width": 7714.1345499051995,
+        "sharpe_ratio": 3.600288177901875,
+        "n_forecasts": 153,
+        "additional": {
+          "pit_ks_statistic": 0.06915032679738561,
+          "pit_p_value": 0.43765211111607394
+        }
+      },
+      "overall": {
+        "rmse": 1729.1091095845377,
+        "mae": 557.2542819167999,
+        "mape": 6.034024650910915,
+        "mdape": 2.4948980536953886,
+        "crps": 714.4254197133636,
+        "direction_accuracy": 0.5403050108932462,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9586056644880174,
+        "calibration_error": 0.008605664488017473,
+        "mean_interval_width": 4219.613193108212,
+        "sharpe_ratio": 1.789282887353533,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    },
+    "arima": {
+      "1d": {
+        "rmse": 471.7551843526257,
+        "mae": 171.38723159102827,
+        "mape": 1.8591408861625585,
+        "mdape": 1.0780329255760444,
+        "crps": 206.67847899251953,
+        "direction_accuracy": 0.35947712418300654,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8823529411764706,
+        "calibration_error": 0.0676470588235294,
+        "mean_interval_width": 796.7321059752067,
+        "sharpe_ratio": 1.6982542044004396,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "5d": {
+        "rmse": 1345.4112149881141,
+        "mae": 431.90730066435543,
+        "mape": 5.042299522211737,
+        "mdape": 2.779236519886263,
+        "crps": 548.1199027247253,
+        "direction_accuracy": 0.39869281045751637,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8169934640522876,
+        "calibration_error": 0.1330065359477124,
+        "mean_interval_width": 1777.1742947870218,
+        "sharpe_ratio": -0.8752536016576389,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "21d": {
+        "rmse": 2340.891198538917,
+        "mae": 913.338405017313,
+        "mape": 10.329957718175464,
+        "mdape": 7.045148845357284,
+        "crps": 1047.830705649848,
+        "direction_accuracy": 0.43137254901960786,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8366013071895425,
+        "calibration_error": 0.11339869281045745,
+        "mean_interval_width": 3678.0248011314543,
+        "sharpe_ratio": 1.7086748645252643,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "overall": {
+        "rmse": 1582.45125199023,
+        "mae": 505.54431242423226,
+        "mape": 5.743799375516586,
+        "mdape": 2.5197508113345877,
+        "crps": 653.0332254667265,
+        "direction_accuracy": 0.39651416122004357,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8453159041394336,
+        "calibration_error": 0.10468409586056637,
+        "mean_interval_width": 2083.9770672978943,
+        "sharpe_ratio": 0.8297027631306334,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    },
+    "garch": {
+      "1d": {
+        "rmse": 421.65909007030206,
+        "mae": 161.24041859837803,
+        "mape": 1.824389927368446,
+        "mdape": 1.04333801373505,
+        "crps": 188.72654074942022,
+        "direction_accuracy": 0.6274509803921569,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9673202614379085,
+        "calibration_error": 0.017320261437908546,
+        "mean_interval_width": 1164.0195769216812,
+        "sharpe_ratio": 3.4418971273643857,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "5d": {
+        "rmse": 1262.7573281174946,
+        "mae": 434.3080607000706,
+        "mape": 4.955061243066608,
+        "mdape": 2.368531956485009,
+        "crps": 523.5640920083443,
+        "direction_accuracy": 0.5751633986928104,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9281045751633987,
+        "calibration_error": 0.02189542483660123,
+        "mean_interval_width": 2723.1096876276133,
+        "sharpe_ratio": 0.7808586198376257,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "21d": {
+        "rmse": 2818.3883861777886,
+        "mae": 1116.0883033825485,
+        "mape": 11.173074470331919,
+        "mdape": 8.157798308462414,
+        "crps": 1276.7385800408738,
+        "direction_accuracy": 0.6078431372549019,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.934640522875817,
+        "calibration_error": 0.015359477124182952,
+        "mean_interval_width": 6329.41277474703,
+        "sharpe_ratio": 3.935717370532049,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "overall": {
+        "rmse": 1799.5986175899693,
+        "mae": 570.545594226999,
+        "mape": 5.9841752135889905,
+        "mdape": 2.5488405330008828,
+        "crps": 738.969420150732,
+        "direction_accuracy": 0.6034858387799564,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.9433551198257081,
+        "calibration_error": 0.006644880174291878,
+        "mean_interval_width": 3405.514013098775,
+        "sharpe_ratio": 2.521307507812849,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    },
+    "ets": {
+      "1d": {
+        "rmse": 430.9489376285663,
+        "mae": 161.0128479282101,
+        "mape": 1.8271558252083664,
+        "mdape": 1.092743745135695,
+        "crps": 191.56422122460384,
+        "direction_accuracy": 0.5424836601307189,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8627450980392157,
+        "calibration_error": 0.08725490196078423,
+        "mean_interval_width": 798.2466966315404,
+        "sharpe_ratio": 1.3825759718888817,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "5d": {
+        "rmse": 1149.682336272345,
+        "mae": 397.971428629173,
+        "mape": 4.8738999443151565,
+        "mdape": 2.6218274588128767,
+        "crps": 484.0742599614469,
+        "direction_accuracy": 0.5490196078431373,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8366013071895425,
+        "calibration_error": 0.11339869281045745,
+        "mean_interval_width": 1784.9338764827767,
+        "sharpe_ratio": 0.9732911810372058,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "21d": {
+        "rmse": 2358.783882571983,
+        "mae": 914.7757567449951,
+        "mape": 10.050141194599215,
+        "mdape": 6.96526185338253,
+        "crps": 1053.120082024405,
+        "direction_accuracy": 0.5228758169934641,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8431372549019608,
+        "calibration_error": 0.10686274509803917,
+        "mean_interval_width": 3658.025910562484,
+        "sharpe_ratio": -0.6162223690801555,
+        "n_forecasts": 153,
+        "additional": {}
+      },
+      "overall": {
+        "rmse": 1535.2901860192626,
+        "mae": 491.253344434126,
+        "mape": 5.583732321374246,
+        "mdape": 2.54217891762246,
+        "crps": 633.3741391148873,
+        "direction_accuracy": 0.5381263616557734,
+        "coverage_50": null,
+        "coverage_80": null,
+        "coverage_95": 0.8474945533769063,
+        "calibration_error": 0.10250544662309369,
+        "mean_interval_width": 2080.4021612256006,
+        "sharpe_ratio": 0.01868863239052494,
+        "n_forecasts": 459,
+        "additional": {}
+      }
+    }
+  },
+  "forecasts_summary": {
+    "fractime_rs": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    },
+    "fractime_dfa": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    },
+    "fractime_ensemble": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    },
+    "arima": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    },
+    "garch": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    },
+    "ets": {
+      "n_forecasts": 459,
+      "assets": [
+        "ETH-USD",
+        "AAPL",
+        "BTC-USD",
+        "^GSPC"
+      ]
+    }
+  }
+}

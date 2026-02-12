@@ -135,6 +135,16 @@ MODELS: Dict[str, Dict[str, Any]] = {
         "module": "fractime",
         "params": {"method": "rs", "lookback": 252},
     },
+    "fractime_rs_v2": {
+        "class": "Forecaster",
+        "module": "fractime",
+        "params": {"method": "rs", "lookback": 252, "scoring": "v2"},
+    },
+    "fractime_rs_v3": {
+        "class": "Forecaster",
+        "module": "fractime",
+        "params": {"method": "rs", "lookback": 252, "scoring": "v3"},
+    },
     "fractime_dfa": {
         "class": "Forecaster",
         "module": "fractime",

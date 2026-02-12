@@ -1,0 +1,24 @@
+\begin{table}[htbp]
+\centering
+\caption{Probabilistic Calibration by Model}
+\label{tab:calibration}
+\begin{tabular}{lcccccc}
+\toprule
+Model & Coverage-50\% & Coverage-80\% & Coverage-95\% & CRPS & Cal. Error & Interval Width \\
+\midrule
+fractime\_rs & -- & -- & 96\% & 710.6750 & 0.0064 & 4199.6017 \\
+fractime\_dfa & -- & -- & 96\% & 718.2822 & 0.0064 & 4164.5880 \\
+fractime\_ensemble & -- & -- & 96\% & 714.4254 & 0.0086 & 4219.6132 \\
+arima & -- & -- & 85\% & 653.0332 & 0.1047 & 2083.9771 \\
+garch & -- & -- & 94\% & 738.9694 & 0.0066 & 3405.5140 \\
+ets & -- & -- & 85\% & 633.3741 & 0.1025 & 2080.4022 \\
+\midrule
+Expected & 50\% & 80\% & 95\% & -- & 0 & -- \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Coverage should match expected levels for well-calibrated forecasts.
+\item CRPS = Continuous Ranked Probability Score (lower is better).
+\end{tablenotes}
+\end{table}

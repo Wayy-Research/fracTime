@@ -250,6 +250,9 @@ class ForecastResult:
     _paths: np.ndarray                    # Shape: (n_paths, n_steps)
     _probabilities: np.ndarray            # Shape: (n_paths,)
 
+    # Optional H-conditioned point forecast (overrides mean/forecast)
+    _point_override: Optional[np.ndarray] = None
+
     # Optional metadata
     dates: Optional[np.ndarray] = None    # Forecast dates
     metadata: dict = field(default_factory=dict)
@@ -281,17 +284,26 @@ class ForecastResult:
 
     @property
     def forecast(self) -> np.ndarray:
-        """Primary forecast (probability-weighted median)."""
+        """Primary forecast. H-conditioned point if available, else weighted median."""
+        if self._point_override is not None:
+            return self._point_override
         if self._forecast is None:
             self._forecast = self._weighted_quantile(0.5)
         return self._forecast
 
     @property
     def mean(self) -> np.ndarray:
-        """Mean forecast across all paths."""
+        """Mean forecast. H-conditioned point if available, else weighted mean of paths."""
+        if self._point_override is not None:
+            return self._point_override
         if self._mean is None:
             self._mean = np.average(self._paths, axis=0, weights=self._probabilities)
         return self._mean
+
+    @property
+    def path_mean(self) -> np.ndarray:
+        """Weighted mean of paths (always from MC, ignoring point override)."""
+        return np.average(self._paths, axis=0, weights=self._probabilities)
 
     @property
     def lower(self) -> np.ndarray:

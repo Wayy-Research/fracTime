@@ -55,6 +55,19 @@ from .visualization import plot, plot_forecast
 from .regime import RegimeDetector
 from .strategy import RegimeStrategy, BacktestResult, quick_backtest
 
+# Advanced analytics (NEW in v0.6)
+from .advanced import (
+    compute_wavelet_hurst,
+    compute_rolling_wavelet_hurst,
+    compute_mf_adcca,
+    compute_qpl,
+    compute_fractal_coherence,
+    compute_rolling_fractal_coherence,
+    compute_ftd,
+    compute_dtw_alignment,
+    compute_dtw_beta,
+)
+
 # Bayesian (optional - requires PyMC)
 try:
     from .bayesian import BayesianFractalForecaster as BayesianForecaster
@@ -63,7 +76,7 @@ except (ImportError, ModuleNotFoundError, NameError, Exception):
     _BAYESIAN_AVAILABLE = False
     BayesianForecaster = None
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     # Core classes
@@ -77,6 +90,17 @@ __all__ = [
     'RegimeStrategy',
     'BacktestResult',
     'quick_backtest',
+
+    # Advanced analytics (NEW in v0.6)
+    'compute_wavelet_hurst',
+    'compute_rolling_wavelet_hurst',
+    'compute_mf_adcca',
+    'compute_qpl',
+    'compute_fractal_coherence',
+    'compute_rolling_fractal_coherence',
+    'compute_ftd',
+    'compute_dtw_alignment',
+    'compute_dtw_beta',
 
     # Convenience functions
     'analyze',

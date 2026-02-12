@@ -79,19 +79,31 @@ class Forecaster:
         method: str = 'rs',
         time_warp: bool = False,
         path_weights: Optional[dict] = None,
+        scoring: str = 'v1',
     ):
         self._data = _ensure_numpy(data)
         self._dates = _ensure_dates(dates)
         self._lookback = lookback
         self._method = method
         self._time_warp = time_warp
+        self._scoring = scoring
 
-        # Path probability weights
-        self._path_weights = path_weights or {
-            'hurst': 0.3,
-            'volatility': 0.3,
-            'pattern': 0.4,
-        }
+        # Path probability weights — defaults differ by scoring version
+        if path_weights is not None:
+            self._path_weights = path_weights
+        elif scoring in ('v2', 'v3'):
+            self._path_weights = {
+                'direction': 0.4,
+                'hurst': 0.2,
+                'volatility': 0.2,
+                'pattern': 0.2,
+            }
+        else:
+            self._path_weights = {
+                'hurst': 0.3,
+                'volatility': 0.3,
+                'pattern': 0.4,
+            }
 
         # Exogenous variables
         self._exogenous = None
@@ -190,9 +202,25 @@ class Forecaster:
             paths = self._generate_fbm_paths(steps, n_paths, hurst, volatility)
 
         # Calculate path probabilities
-        probabilities = self._calculate_path_probabilities(
-            paths, hurst, volatility, steps
-        )
+        if self._scoring == 'v2':
+            probabilities = self._calculate_path_probabilities_v2(
+                paths, hurst, volatility, steps
+            )
+        elif self._scoring == 'v3':
+            probabilities = self._calculate_path_probabilities_v2(
+                paths, hurst, volatility, steps
+            )
+        else:
+            probabilities = self._calculate_path_probabilities(
+                paths, hurst, volatility, steps
+            )
+
+        # For v3: compute H-conditioned point forecast directly
+        point_override = None
+        if self._scoring == 'v3':
+            point_override = self._compute_h_conditioned_forecast(
+                steps, hurst, volatility
+            )
 
         # Prepare forecast dates if available
         forecast_dates = None
@@ -202,6 +230,7 @@ class Forecaster:
         return ForecastResult(
             _paths=paths,
             _probabilities=probabilities,
+            _point_override=point_override,
             dates=forecast_dates,
             metadata={
                 'hurst': hurst,
@@ -209,6 +238,7 @@ class Forecaster:
                 'volatility': volatility,
                 'regime': self.regime,
                 'n_patterns': len(matches),
+                'scoring': self._scoring,
             }
         )
 
@@ -336,6 +366,175 @@ class Forecaster:
         probabilities = scores / np.sum(scores)
 
         return probabilities
+
+    def _calculate_path_probabilities_v2(
+        self,
+        paths: np.ndarray,
+        target_hurst: float,
+        target_vol: float,
+        steps: int,
+    ) -> np.ndarray:
+        """Calculate path probabilities using directional tilt + fractal matching.
+
+        V2 scoring uses the Hurst exponent to act on its measurement:
+        - H > 0.5 + upward momentum → weight upward paths (persistence)
+        - H < 0.5 + upward momentum → weight downward paths (reversion)
+        - H ≈ 0.5 → stay neutral (random walk, no tilt)
+
+        Fractal pattern matching is retained: paths whose fractal structure
+        matches the observed Hurst get weighted up.
+        """
+        n_paths = paths.shape[0]
+        scores = np.zeros(n_paths)
+
+        # --- Directional signal from H + momentum ---
+        lookback = min(21, len(self._returns))
+        recent_returns = self._returns[-lookback:]
+        momentum = float(np.mean(recent_returns))
+        vol = float(np.std(recent_returns))
+        # Normalize momentum by volatility → z-score-like quantity
+        momentum_z = momentum / vol if vol > 0 else 0.0
+
+        # persistence ∈ [-1, 1]: positive = trending, negative = reverting
+        persistence = 2.0 * target_hurst - 1.0
+        # directional_signal: sign = predicted direction, magnitude = confidence
+        directional_signal = persistence * momentum_z
+        signal_strength = float(np.tanh(abs(directional_signal)))
+
+        # --- Weights ---
+        w_dir = self._path_weights.get('direction', 0.4)
+        w_hurst = self._path_weights.get('hurst', 0.2)
+        w_vol = self._path_weights.get('volatility', 0.2)
+        w_pattern = self._path_weights.get('pattern', 0.2)
+
+        last_price = self._data[-1]
+
+        for i in range(n_paths):
+            path = paths[i]
+            path_with_start = np.concatenate([[last_price], path])
+            path_returns = np.diff(np.log(path_with_start))
+
+            if len(path_returns) < 2:
+                scores[i] = 1.0
+                continue
+
+            # 1. Directional tilt — the key new component
+            path_return = (path[-1] - last_price) / last_price
+            if abs(directional_signal) > 0.01:
+                aligned = np.sign(path_return) == np.sign(directional_signal)
+                dir_score = (1.0 + signal_strength) if aligned else (1.0 - signal_strength * 0.5)
+            else:
+                dir_score = 1.0
+
+            # 2. Fractal pattern match — keep paths that look like observed H
+            try:
+                path_hurst = compute_hurst_rs(path, 5, min(20, max(steps // 2, 6)))
+                hurst_score = 1.0 / (1.0 + abs(path_hurst - target_hurst) * 5)
+            except Exception:
+                hurst_score = 0.5
+
+            # 3. Volatility match
+            path_vol = np.std(path_returns) * np.sqrt(252)
+            vol_ratio = path_vol / target_vol if target_vol > 0 else 1.0
+            vol_score = 1.0 / (1.0 + abs(np.log(vol_ratio + 1e-10)) * 2)
+
+            # 4. Pattern continuity (smoothness)
+            if len(path_returns) > 1:
+                second_diff = np.diff(path_returns)
+                pattern_score = 1.0 / (1.0 + np.std(second_diff) * 10)
+            else:
+                pattern_score = 0.5
+
+            scores[i] = (
+                w_dir * dir_score
+                + w_hurst * hurst_score
+                + w_vol * vol_score
+                + w_pattern * pattern_score
+            )
+
+        scores = np.clip(scores, 1e-10, None)
+        return scores / np.sum(scores)
+
+    def _compute_h_conditioned_forecast(
+        self,
+        steps: int,
+        hurst: float,
+        volatility: float,
+    ) -> np.ndarray:
+        """Compute point forecast using Wiener-Hopf optimal linear prediction.
+
+        Uses the fractional Gaussian noise (fGn) autocovariance structure
+        to find the optimal linear combination of past returns for predicting
+        each future return. This is the best linear unbiased predictor (BLUP)
+        for fGn.
+
+        For a lookback window of p past returns r_{t}, ..., r_{t-p+1}:
+            r̂_{t+h} = a_1*r_t + a_2*r_{t-1} + ... + a_p*r_{t-p+1}
+        where a = Gamma^{-1} * gamma_h, with:
+            Gamma[i,j] = rho(|i-j|)      (autocovariance matrix)
+            gamma_h[j]  = rho(h+j)        (cross-covariance at horizon h)
+
+        Lookback is set adaptively by finding where the autocovariance
+        drops below a threshold, ensuring anti-persistent series use few
+        lags (signal at lag 1) and persistent series use many.
+        """
+        last_price = self._data[-1]
+        h2 = 2.0 * hurst
+
+        # --- fGn autocovariance function ---
+        def fgn_acov(k: int) -> float:
+            """Exact fGn autocovariance at lag k (unit variance)."""
+            if k == 0:
+                return 1.0
+            return 0.5 * (abs(k + 1) ** h2 - 2.0 * abs(k) ** h2 + abs(k - 1) ** h2)
+
+        # --- Adaptive lookback from autocovariance decay ---
+        # Include lags where |rho(k)| > threshold
+        acov_threshold = 0.01
+        max_lookback = min(63, len(self._returns))
+        lookback = 1
+        for k in range(1, max_lookback + 1):
+            if abs(fgn_acov(k)) >= acov_threshold:
+                lookback = k
+            else:
+                break
+        # Minimum 3 lags for stability, cap at available data
+        lookback = max(3, min(lookback + 1, len(self._returns)))
+
+        # Recent returns in reverse chronological order: r_t, r_{t-1}, ...
+        recent = self._returns[-lookback:][::-1]
+        p = len(recent)
+
+        # --- Build autocovariance matrix Gamma[i,j] = rho(|i-j|) ---
+        gamma_matrix = np.zeros((p, p))
+        for i in range(p):
+            for j in range(p):
+                gamma_matrix[i, j] = fgn_acov(abs(i - j))
+
+        # Regularize for numerical stability
+        gamma_matrix += np.eye(p) * 1e-8
+
+        # --- Predict each future step ---
+        forecast = np.zeros(steps)
+        cum_return = 0.0
+
+        for t in range(1, steps + 1):
+            # Cross-covariance vector: gamma_h[j] = rho(t + j) for j=0..p-1
+            # j=0 corresponds to most recent return r_t
+            gamma_vec = np.array([fgn_acov(t + j) for j in range(p)])
+
+            # Optimal weights: a = Gamma^{-1} * gamma_h
+            try:
+                weights = np.linalg.solve(gamma_matrix, gamma_vec)
+            except np.linalg.LinAlgError:
+                weights = np.zeros(p)
+
+            # Predicted return = weighted sum of recent returns
+            predicted_return = float(np.dot(weights, recent))
+            cum_return += predicted_return
+            forecast[t - 1] = last_price * np.exp(cum_return)
+
+        return forecast
 
     def _generate_forecast_dates(self, steps: int) -> np.ndarray:
         """Generate forecast dates based on historical frequency."""

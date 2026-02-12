@@ -382,31 +382,44 @@ def find_similar_patterns(
 @njit
 def generate_fbm(n: int, hurst: float) -> np.ndarray:
     """
-    Generate fractional Brownian motion path.
+    Generate fractional Brownian motion path via Mandelbrot-Van Ness kernel.
+
+    Uses the integrated kernel with exponent H + 0.5 to avoid the
+    singularity at 0^(H-0.5) that made the old implementation produce
+    NaN/zero for H <= 0.5.
+
+    The weight for noise j contributing to B_H(i) is:
+        w(i,j) = (i-j)^{H+0.5} - (i-j-1)^{H+0.5}
+
+    This is numerically stable for all H in (0, 1) because
+    0^{H+0.5} = 0 when H > 0.
+
+    For H = 0.5: all weights equal 1, giving standard Brownian motion.
+    For H > 0.5: recent noise weighted more → persistence.
+    For H < 0.5: distant noise retains weight → anti-persistence in increments.
 
     Args:
         n: Number of steps
-        hurst: Hurst exponent
+        hurst: Hurst exponent in (0, 1)
 
     Returns:
-        fBm path of length n
+        fBm path of length n, starting at 0
     """
     noise = np.random.normal(0, 1, n)
     dt = 1.0 / n
-    t = np.arange(n) * dt
 
     fbm = np.zeros(n)
-    fbm[0] = 0
+    exp = hurst + 0.5  # Integrated kernel exponent — no singularity
 
     for i in range(1, n):
-        weights = np.zeros(i)
+        s = 0.0
         for j in range(i):
-            weights[j] = ((i - j) ** (hurst - 0.5) - (i - j - 1) ** (hurst - 0.5))
-        fbm[i] = np.sum(weights * noise[:i])
+            k = i - j  # k >= 1, so (k-1) >= 0, and 0^exp = 0 for exp > 0
+            w = k ** exp - (k - 1) ** exp
+            s += w * noise[j]
+        fbm[i] = s
 
-    # Scale by sqrt(dt)
     fbm *= np.sqrt(dt)
-
     return fbm
 
 
