@@ -1,32 +1,17 @@
-# Python
+# Python-generated files
 __pycache__/
-*.py[cod]
-*.so
-.venv/
-venv/
-.env
-*.egg-info/
-dist/
+*.py[oc]
 build/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-
-# Node
-node_modules/
-.next/
 dist/
-.env.local
+wheels/
+*.egg-info
 
-# Jupyter
-.ipynb_checkpoints/
+# Virtual environments
+.venv
 
-# OS
-.DS_Store
-*.swp
+# Research outputs
+research_results/
 
-# Playwright
-.playwright-mcp/
-
+# Generated visualization files
+*.html
+!docs/**/*.html
